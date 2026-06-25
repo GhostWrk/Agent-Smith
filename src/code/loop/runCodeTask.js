@@ -1,0 +1,399 @@
+/**
+ * Code Mode outer orchestrator — bootstrap, optional plan approval, turn loop, persist.
+ */
+'use strict';
+
+const crypto = require('crypto');
+const { CodeSession } = require('../session/state.js');
+const { PlanAnchor } = require('../context/planAnchor.js');
+const { PlanArtifacts } = require('../context/planArtifacts.js');
+const { buildBootstrapBlock } = require('../context/bootstrap.js');
+const { detectProjectCommands } = require('../../shared/verificationHarness.js');
+const { EarlyStopDetector } = require('../governor/earlyStop.js');
+const { QualityMonitor } = require('../governor/qualityMonitor.js');
+const { resolveInitialPhase } = require('../loop/phases.js');
+const { runTurnLoop } = require('./turnLoop.js');
+const { runPlanningPhase } = require('./planningPhase.js');
+const { CodeRunTrace } = require('./codeTrace.js');
+const { markApproved, isExploreStep } = require('../plan/codePlan.js');
+const { goalImpliesNewArtifacts } = require('../context/artifactHints.js');
+const { createRunWorktree, cleanupWorktree } = require('../../main/services/worktreeManager.js');
+const {
+    shouldUseSubagents,
+    runMilestoneSubagentOrchestrator
+} = require('./milestoneSubagents.js');
+
+function newSessionId() {
+    return `code_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+}
+
+async function executeTurnLoop(opts) {
+    const {
+        session, planAnchor, planArtifacts, earlyStop, qualityMonitor, trace,
+        userDataPath, buildExecDeps, execDeps: execDepsIn, emit, signal, pluginToolSchemas, pluginToolNames,
+        streamCompletion, memory
+    } = opts;
+
+    const sessionId = session.id;
+    const execDeps = typeof buildExecDeps === 'function'
+        ? buildExecDeps(sessionId)
+        : Object.assign({}, execDepsIn || {}, { sessionId });
+
+    const wrapEmit = (ev) => {
+        ev.run_id = session.runId || sessionId;
+        ev.sessionId = sessionId;
+        emit(ev);
+    };
+
+    let finalSummary = '';
+    try {
+        await runTurnLoop({
+            session,
+            apiBaseUrl: opts.apiBaseUrl,
+            tools: null,
+            userPrompt: session.goal,
+            emit: wrapEmit,
+            signal,
+            execDeps,
+            planAnchor,
+            planArtifacts,
+            qualityMonitor,
+            earlyStop,
+            trace,
+            userDataPath,
+            onCheckpoint: () => {
+                session.planAnchorState = planAnchor.serialize();
+                session.planArtifactsState = planArtifacts.serialize();
+                CodeSession.saveDebounced(userDataPath, session);
+            },
+            pluginToolNames: pluginToolNames || session.pluginToolNames,
+            pluginToolSchemas: pluginToolSchemas || [],
+            streamCompletion
+        });
+
+        if (session.status === 'running') session.status = 'unverified';
+        session.finishedAt = Date.now();
+        if (session.isolatedRun && session.worktreePath && opts.projectRoot) {
+            try { cleanupWorktree(session.parentProjectRoot || opts.projectRoot, sessionId); } catch (e) { /* non-fatal */ }
+        }
+        if (opts.pluginManager?.fireHook) {
+            try {
+                await opts.pluginManager.fireHook('sessionStop', {
+                    sessionId: session.id,
+                    status: session.status,
+                    goal: session.goal
+                });
+            } catch (e) { /* non-fatal */ }
+        }
+        if (session.codePlan && opts.pluginManager?.fireHook) {
+            try {
+                await opts.pluginManager.fireHook('onPlanDone', {
+                    sessionId: session.id,
+                    goal: session.goal,
+                    status: session.status,
+                    codePlan: session.codePlan
+                });
+            } catch (e) { /* non-fatal */ }
+        }
+        wrapEmit({
+            type: 'done',
+            sessionId,
+            turn: session.turn,
+            toolCount: session.toolCount,
+            status: session.status
+        });
+    } catch (e) {
+        if (/aborted/i.test(e.message)) {
+            session.status = 'aborted';
+            wrapEmit({ type: 'error', message: 'Run aborted' });
+        } else {
+            session.status = 'error';
+            session.error = e.message;
+            wrapEmit({ type: 'error', message: e.message });
+        }
+    }
+
+    session.planAnchorState = planAnchor.serialize();
+    session.planArtifactsState = planArtifacts.serialize();
+
+    if (memory && typeof memory.remember === 'function' && (session.filesTouched || []).length) {
+        try {
+            await memory.remember(
+                `Code task: "${session.goal}" → ${session.status}. Files: ${session.filesTouched.join(', ')}.`,
+                { kind: 'code-run', status: session.status, project: session.projectRoot }
+            );
+        } catch (e) { /* best-effort */ }
+    }
+
+    try {
+        trace.exportToUserData(userDataPath, session.goal, session.finalSummary || finalSummary);
+    } catch (e) { /* non-fatal */ }
+
+    await CodeSession.save(userDataPath, session);
+    return session;
+}
+
+async function runCodeTask(opts) {
+    const {
+        prompt, projectRoot, model, numCtx, apiBaseUrl,
+        userDataPath, projectContext, buildExecDeps, emit, signal
+    } = opts;
+
+    const sessionId = opts.sessionId || newSessionId();
+    let session;
+    let planAnchor;
+    let planArtifacts;
+    let earlyStop;
+    let qualityMonitor;
+    let trace;
+
+    const wrapEmit = (ev) => {
+        ev.run_id = session?.runId || sessionId;
+        ev.sessionId = sessionId;
+        emit(ev);
+    };
+
+    if (opts.resumeSession) {
+        session = opts.resumeSession;
+        planArtifacts = await PlanArtifacts.load(projectRoot, session.goal);
+        if (session.planArtifactsState) planArtifacts.restore(session.planArtifactsState);
+        planAnchor = new PlanAnchor(session.goal, planArtifacts);
+        if (session.planAnchorState) planAnchor.restore(session.planAnchorState);
+        earlyStop = new EarlyStopDetector({ maxTurns: opts.maxTurns || 40 });
+        qualityMonitor = new QualityMonitor();
+        trace = new CodeRunTrace(session.runId || sessionId);
+        trace.inputReceived('resume');
+
+        if (opts.continueAfterApproval) {
+            markApproved(session.codePlan);
+            if (session.codePlan?.steps?.length && goalImpliesNewArtifacts(session.goal)) {
+                const idx = session.codePlan.currentStepIndex ?? 0;
+                const cur = session.codePlan.steps[idx];
+                if (cur && isExploreStep(cur.title)) {
+                    cur.title = 'Create required files (HTML, CSS, JS)';
+                }
+            }
+            if (opts.pluginManager?.fireHook) {
+                try {
+                    await opts.pluginManager.fireHook('onPlanApproved', {
+                        sessionId: session.id,
+                        goal: session.goal,
+                        codePlan: session.codePlan
+                    });
+                } catch (e) { /* non-fatal */ }
+            }
+            session.status = 'running';
+            session.workflow = 'executing';
+            wrapEmit({ type: 'plan_approved', sessionId: session.id, codePlan: session.codePlan });
+        } else if (session.status === 'awaiting_approval') {
+            session.workflow = 'awaiting_approval';
+        } else {
+            session.status = 'running';
+        }
+    } else {
+        session = new CodeSession(sessionId, {
+            goal: prompt,
+            projectRoot,
+            model,
+            numCtx,
+            codeTemperature: opts.codeTemperature ?? 0.2
+        });
+        session.status = 'running';
+        session.runId = sessionId;
+
+        planArtifacts = await PlanArtifacts.ensure(projectRoot, prompt, {
+            forcePlan: opts.forcePlan
+        });
+        planAnchor = new PlanAnchor(prompt, planArtifacts);
+        earlyStop = new EarlyStopDetector({ maxTurns: opts.maxTurns || 40 });
+        qualityMonitor = new QualityMonitor();
+
+        session.isolatedRun = !!opts.isolatedRun;
+        session.parallelMilestones = !!opts.parallelMilestones;
+        session.milestoneWorktrees = !!opts.milestoneWorktrees;
+        session.milestoneConcurrent = !!opts.milestoneConcurrent;
+
+        const skipRunIsolation = session.milestoneWorktrees && session.parallelMilestones;
+        if (session.isolatedRun && !skipRunIsolation) {
+            const wt = createRunWorktree(projectRoot, sessionId);
+            if (wt.error) {
+                wrapEmit({ type: 'error', message: wt.error });
+                session.status = 'error';
+                await CodeSession.save(userDataPath, session);
+                return session;
+            }
+            session.worktreePath = wt.path;
+            session.parentProjectRoot = projectRoot;
+            session.projectRoot = wt.path;
+            projectContext.setRoot(wt.path);
+            wrapEmit({ type: 'worktree_created', path: wt.path, branch: wt.branch });
+        }
+
+        let treeSummary = '';
+        try {
+            const tree = await projectContext.listProjectTree();
+            treeSummary = typeof tree === 'string' ? tree : JSON.stringify(tree).slice(0, 1500);
+        } catch (e) { /* non-fatal */ }
+
+        session.phase = resolveInitialPhase({ projectRoot, treeSummary, goal: prompt });
+        session.greenfield = session.phase === 'implement';
+        session.projectMeta = detectProjectCommands(session.projectRoot || projectRoot);
+        session.grindMode = opts.grindMode !== false;
+
+        let bootstrap = buildBootstrapBlock(projectRoot, treeSummary, prompt);
+
+        if (opts.memory && typeof opts.memory.recall === 'function') {
+            try {
+                const mems = await opts.memory.recall(prompt);
+                if (Array.isArray(mems) && mems.length) {
+                    bootstrap += '\n\n[RELEVANT MEMORY — from past sessions, may be stale]\n' +
+                        mems.slice(0, 3).map(m => `- ${String(m).slice(0, 300)}`).join('\n');
+                }
+            } catch (e) { /* memory is best-effort */ }
+        }
+
+        session.messages.push({ role: 'user', content: `${bootstrap}\n\n[TASK]\n${prompt}` });
+
+        trace = new CodeRunTrace(sessionId);
+        trace.inputReceived(prompt.slice(0, 200));
+        trace.contextLoaded('bootstrap');
+    }
+
+    session.planArtifacts = planArtifacts;
+    session.pluginToolNames = (opts.pluginToolSchemas || [])
+        .map(s => s.function && s.function.name).filter(Boolean);
+    session.grindMode = opts.grindMode !== false;
+    if (!session.projectMeta) {
+        session.projectMeta = detectProjectCommands(session.projectRoot || projectRoot);
+    }
+
+    wrapEmit({ type: 'run_start', sessionId, goal: session.goal, resumed: !!opts.resumeSession, codePlan: session.codePlan || null });
+
+    if (opts.pluginManager?.fireHook) {
+        try {
+            await opts.pluginManager.fireHook('sessionStart', {
+                sessionId: session.id,
+                goal: session.goal,
+                projectRoot: session.projectRoot,
+                isolated: !!session.isolatedRun
+            });
+        } catch (e) { /* non-fatal */ }
+    }
+
+    const execDeps = typeof buildExecDeps === 'function'
+        ? buildExecDeps(sessionId)
+        : Object.assign({}, opts.execDeps || {}, { sessionId });
+
+    const needPlanning = opts.requirePlanApproval
+        && !opts.continueAfterApproval
+        && !session.codePlan
+        && !opts.resumeSession;
+
+    if (needPlanning) {
+        await runPlanningPhase({
+            session,
+            apiBaseUrl,
+            model: session.model,
+            emit: wrapEmit,
+            signal,
+            execDeps,
+            trace,
+            streamCompletion: opts.streamCompletion
+        });
+        session.planAnchorState = planAnchor.serialize();
+        await CodeSession.save(userDataPath, session);
+        return session;
+    }
+
+    if (session.status === 'awaiting_approval' && !opts.continueAfterApproval) {
+        wrapEmit({
+            type: 'plan_awaiting_approval',
+            sessionId,
+            goal: session.goal,
+            codePlan: session.codePlan
+        });
+        await CodeSession.save(userDataPath, session);
+        return session;
+    }
+
+    const parentProjectRoot = session.parentProjectRoot || projectRoot;
+
+    if (shouldUseSubagents(session, planArtifacts) && !opts._subagentChild) {
+        const orch = await runMilestoneSubagentOrchestrator({
+            session,
+            planArtifacts,
+            planAnchor,
+            earlyStop,
+            qualityMonitor,
+            trace,
+            userDataPath,
+            buildExecDeps,
+            execDeps: opts.execDeps,
+            emit,
+            signal,
+            apiBaseUrl: opts.apiBaseUrl,
+            pluginToolSchemas: opts.pluginToolSchemas,
+            pluginToolNames: opts.pluginToolNames,
+            streamCompletion: opts.streamCompletion,
+            memory: opts.memory,
+            pluginManager: opts.pluginManager,
+            parentProjectRoot,
+            projectContext,
+            executeTurnLoop
+        });
+
+        if (orch.handled) {
+            const finalGate = orch.finalGate;
+            session.status = finalGate.allow ? 'done' : 'unverified';
+            session.validation = {
+                status: session.status,
+                messages: finalGate.messages,
+                ranChecks: finalGate.ranChecks
+            };
+            wrapEmit({
+                type: 'done',
+                sessionId,
+                status: session.status,
+                subagents: true,
+                subagentMode: orch.mode
+            });
+            if (session.isolatedRun && session.worktreePath && !session.milestoneWorktrees) {
+                cleanupWorktree(session.parentProjectRoot || projectRoot, sessionId);
+            }
+            if (opts.pluginManager?.fireHook) {
+                try {
+                    await opts.pluginManager.fireHook('sessionStop', {
+                        sessionId: session.id,
+                        status: session.status,
+                        subagents: true,
+                        subagentMode: orch.mode
+                    });
+                } catch (e) { /* non-fatal */ }
+            }
+            await CodeSession.save(userDataPath, session);
+            return session;
+        }
+    }
+
+    return executeTurnLoop({
+        session,
+        planAnchor,
+        planArtifacts,
+        earlyStop,
+        qualityMonitor,
+        trace,
+        userDataPath,
+        buildExecDeps,
+        execDeps: opts.execDeps,
+        emit,
+        signal,
+        apiBaseUrl,
+        pluginToolSchemas: opts.pluginToolSchemas,
+        pluginToolNames: opts.pluginToolNames,
+        streamCompletion: opts.streamCompletion,
+        memory: opts.memory,
+        pluginManager: opts.pluginManager
+    });
+}
+
+module.exports = { runCodeTask, executeTurnLoop, newSessionId };

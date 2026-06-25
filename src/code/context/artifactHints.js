@@ -1,0 +1,139 @@
+/**
+ * Hints for "create new app/game in an existing repo" — avoid editing the host app's index.html.
+ */
+'use strict';
+
+const fs = require('fs');
+const path = require('path');
+const { pickNextMissing } = require('../loop/missingRefGuard.js');
+
+/** Task asks for a new deliverable (game, site, app) rather than editing the host project. */
+function goalImpliesNewArtifacts(goal) {
+    const t = String(goal || '').toLowerCase();
+    if (!/\b(create|build|scaffold|make|write|develop)\b/.test(t)) return false;
+    return /\b(game|app|website|web[\s-]?based|web[\s-]?app|pac-?man|site|page|demo|preview)\b/.test(t);
+}
+
+function suggestArtifactSubdir(goal) {
+    const t = String(goal || '').toLowerCase();
+    if (/pac-?man/.test(t)) return 'pacman';
+    if (/\bgame\b/.test(t)) return 'game';
+    if (/\b(site|website|page)\b/.test(t)) return 'site';
+    return 'app';
+}
+
+/** Workspace looks like Electron / desktop host (not a static web game root). */
+function detectAppRepo(projectRoot) {
+    try {
+        const pkgPath = path.join(projectRoot, 'package.json');
+        if (fs.existsSync(pkgPath)) {
+            const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+            const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+            if (deps.electron) return true;
+            if (pkg.main && /main\.js|electron/i.test(String(pkg.main))) return true;
+        }
+        if (fs.existsSync(path.join(projectRoot, 'main.js'))
+            && fs.existsSync(path.join(projectRoot, 'index.html'))) {
+            return true;
+        }
+    } catch (e) { /* non-fatal */ }
+    return false;
+}
+
+function goalWantsPreview(goal) {
+    return /\b(show|open|display|launch)\b.*\bpreview\b|\bpreview\b/i.test(String(goal || ''));
+}
+
+/** Bootstrap / gate nudge when building a new web artifact inside an app repo. */
+function buildNewArtifactBlock(goal, projectRoot) {
+    if (!goalImpliesNewArtifacts(goal)) return '';
+    const sub = suggestArtifactSubdir(goal);
+    const lines = [
+        '',
+        '[NEW ARTIFACT — do not edit the host app]',
+        `Create a self-contained web deliverable under \`${sub}/\`: ${sub}/index.html, ${sub}/style.css, ${sub}/script.js.`,
+        'Link CSS/JS in HTML. Use backticks for JS template literals. CSS class names must match JS classList usage.'
+    ];
+    if (detectAppRepo(projectRoot)) {
+        lines.push(
+            `This workspace is an Electron/app repo — the root index.html is NOT your game. Write under \`${sub}/\` only.`
+        );
+    }
+    if (goalWantsPreview(goal)) {
+        lines.push(`After the files exist, call show_preview with path \`${sub}/index.html\`.`);
+    }
+    lines.push(
+        `All three files must live as siblings inside \`${sub}/\` — link as href="style.css" and src="script.js" (not pacman/style.css from root index.html).`,
+        'Start with write_file now — do not read the root index.html unless you are patching an existing game file.'
+    );
+    return lines.join('\n');
+}
+
+/** Urgent system nudge after the completion gate blocks with zero writes. */
+function buildWriteNudge(goal, projectRoot) {
+    const sub = suggestArtifactSubdir(goal);
+    const preview = goalWantsPreview(goal) ? `\n4. show_preview path="${sub}/index.html"` : '';
+    return [
+        '[HARNESS — WRITE REQUIRED]',
+        'You stopped without creating files. Respond with tool calls ONLY (no prose).',
+        `Required sequence:`,
+        `1. write_file path="${sub}/index.html" — complete HTML linking style.css and script.js`,
+        `2. write_file path="${sub}/style.css" — the complete stylesheet`,
+        `3. write_file path="${sub}/script.js" — the complete game: state, input, loop, win/lose${preview}`,
+        detectAppRepo(projectRoot)
+            ? `Do NOT patch the root index.html — it belongs to the host app.`
+            : `Create all three files before stopping again.`
+    ].join('\n');
+}
+
+/** Urgent nudge when HTML exists but linked CSS/JS files are missing. */
+function buildMissingRefsNudge(missingRefs, goal, projectRoot) {
+    const refs = [...new Set((missingRefs || []).filter(Boolean))];
+    if (!refs.length) return '';
+    const next = pickNextMissing(refs) || refs[0];
+    const preview = goalWantsPreview(goal) ? `\nAfter all files exist: show_preview path="${suggestArtifactSubdir(goal)}/index.html".` : '';
+    const gameHint = /\b(game|pac-?man)\b/i.test(String(goal || ''))
+        ? ' Include keyboard input, score updates, game loop, and win/lose logic.'
+        : '';
+    return [
+        '[HARNESS — CREATE MISSING FILES]',
+        'Respond with ONE tool call only — no prose, no HTML.',
+        `NEXT: write_file path="${next}" with the complete ${/\.css$/i.test(next) ? 'CSS' : 'JavaScript'}.${gameHint}`,
+        'Do NOT rewrite pacman/index.html or any .html file.',
+        refs.length > 1 ? `Still needed after that: ${refs.filter(r => r !== next).join(', ')}` : '',
+        detectAppRepo(projectRoot)
+            ? 'Use the full path above (e.g. pacman/script.js), not bare script.js at project root.'
+            : '',
+        preview
+    ].filter(Boolean).join('\n');
+}
+
+/** After harness recovery — keep the run going (preview / verify), do not treat as done. */
+function buildContinueAfterRecoveryNudge(goal, htmlRel, previewOpened) {
+    const sub = suggestArtifactSubdir(goal);
+    const html = htmlRel || `${sub}/index.html`;
+    const lines = [
+        '[CONTINUE — run still active]',
+        'Recovery finished. Do not stop or replan from scratch.',
+        'Do NOT rewrite existing game files unless fixing a validation error.'
+    ];
+    if (goalWantsPreview(goal) && !previewOpened) {
+        lines.push(`NEXT (one tool call): show_preview kind=project_file target="${html}"`);
+    } else if (goalWantsPreview(goal)) {
+        lines.push('Preview was opened. Reply briefly that the game is ready.');
+    } else {
+        lines.push('Reply briefly that the game is ready — no further writes needed.');
+    }
+    return lines.join('\n');
+}
+
+module.exports = {
+    goalImpliesNewArtifacts,
+    suggestArtifactSubdir,
+    detectAppRepo,
+    goalWantsPreview,
+    buildNewArtifactBlock,
+    buildWriteNudge,
+    buildMissingRefsNudge,
+    buildContinueAfterRecoveryNudge
+};

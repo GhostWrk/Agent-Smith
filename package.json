@@ -1,0 +1,102 @@
+{
+  "name": "agent-smith",
+  "version": "46.11.0",
+  "description": "Agent Smith - Full-project local coding agent with durable plan memory, a plugin system, and the Agent Smith persona.",
+  "homepage": "https://github.com/dreammuse/agent-smith",
+  "main": "main.js",
+  "author": {
+    "name": "Agent Smith",
+    "email": "dreammuseltd@gmail.com"
+  },
+  "scripts": {
+    "prestart": "node scripts/build-renderer.js",
+    "start": "electron .",
+    "predist": "node scripts/build-renderer.js",
+    "dist": "electron-builder",
+    "test": "node --test \"tests/*.test.js\"",
+    "harness-eval-regression": "node --test \"tests/harness-eval/regression/*.test.js\"",
+    "harness-eval-capability": "node --test \"tests/harness-eval/capability/*.test.js\"",
+    "harness-security": "node --test \"tests/harness-security/*.test.js\"",
+    "harness-eval": "node --test \"tests/harness-eval/regression/*.test.js\" \"tests/harness-eval/capability/*.test.js\"",
+    "ship-check": "node scripts/ship-check.js",
+    "build:renderer": "node scripts/build-renderer.js",
+    "watch:renderer": "node scripts/build-renderer.js --watch",
+    "install-desktop": "bash scripts/install-linux-desktop.sh"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^28.3.3",
+    "electron-builder": "^24.9.1",
+    "esbuild": "^0.28.0"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "fast-glob": "^3.3.2",
+    "highlight.js": "^11.9.0",
+    "ignore": "^5.3.1",
+    "marked": "^11.1.1"
+  },
+  "optionalDependencies": {
+    "qrcode": "^1.5.4",
+    "whatsapp-web.js": "^1.34.6"
+  },
+  "build": {
+    "appId": "com.agentsmith.matrix",
+    "productName": "Agent Smith",
+    "icon": "build/icon.png",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "src/**/*",
+      "docs/**/*",
+      "examples/**/*",
+      "main.js",
+      "preload.js",
+      "index.html",
+      "package.json",
+      "icon.png",
+      "build/icon.png",
+      "build/icons/**/*",
+      "AGENTS.md",
+      "SMITH.md",
+      "PROTOCOL.md",
+      "LICENSE",
+      "run.sh",
+      "run.cmd"
+    ],
+    "asar": true,
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icons",
+      "category": "Utility",
+      "executableName": "agent-smith",
+      "desktop": {
+        "Name": "Agent Smith",
+        "StartupWMClass": "agent-smith"
+      }
+    },
+    "mac": {
+      "icon": "build/icon.png",
+      "category": "public.app-category.developer-tools"
+    },
+    "win": {
+      "icon": "build/icon.png",
+      "target": "nsis"
+    }
+  }
+}

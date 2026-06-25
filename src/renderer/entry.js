@@ -1,0 +1,26 @@
+/**
+ * Renderer bundle entry — Code Mode IPC bridge + shared persona (no agent loop).
+ */
+require('../shared/renderThrottle.js');
+require('../shared/contextPrune.js');
+require('../shared/smithPersona.js');
+require('../shared/modelClassifier.js');
+require('../shared/runtimeProfile.js');
+require('../code/context/gemmaHarness.js');
+require('./timeline/eventAdapter.js');
+require('./timeline/diffView.js');
+require('./timeline/activityTimeline.js');
+require('./ui/scrollFollow.js');
+require('./ui/historyPersistence.js');
+require('./modes/agentTools.js');
+require('./modes/chatLoop.js');
+require('./modes/runState.js');
+require('./modes/modeHistory.js');
+require('./modes/code.js');
+require('./ui/codeRunUI.js');
+require('./ui/runtimeProfileUI.js');
+require('./ui/codePlanPanel.js');
+require('./ui/previewPanel.js');
+require('./ui/sidebarLayout.js');
+require('./ui/modeBar.js');
+require('./ui/modelPicker.js');

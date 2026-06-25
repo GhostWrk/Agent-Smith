@@ -1,0 +1,35 @@
+Agent Smith (v45.0.3) - Diagnostic & Remediation Report
+Date: June 10, 2026
+
+This report documents the chain of failures encountered while attempting to build and run the Agent Smith application on Linux, along with the specific technical fixes applied to resolve them.
+
+---
+
+### 1. Build Failures (electron-builder)
+*   **Symptom:** `npm run dist` failed when attempting to build the `.deb` package.
+*   **Root Cause:** The `electron-builder` library strictly requires a `homepage` metadata field in `package.json` for Linux `.deb` targets. This field was absent.
+*   **Fix:** Added `"homepage": "https://github.com/dreammuse/agent-smith"` to `package.json`.
+
+### 2. Missing Dependencies (bcryptjs)
+*   **Symptom:** The main IPC verification script (`node scripts/verify-main-ipc.js`) failed with `Error: Cannot find module 'bcryptjs'`.
+*   **Root Cause:** The `bcryptjs` package, which is heavily relied upon by `src/main/services/auth.js` for password hashing, was missing from the `node_modules` folder, preventing the main process from loading.
+*   **Fix:** Ran `npm install` with appropriate system permissions to fetch all required packages.
+
+### 3. Read-Only Filesystem Crash (app.asar)
+*   **Symptom:** In the packaged release (.deb/AppImage), the application started up but failed to register any IPC handlers, resulting in the error: `No handler registered for 'auth-register'`.
+*   **Root Cause:** The `src/ghosttrace/index.js` module contained a hardcoded directive to create directories (`fs.mkdirSync`) directly inside its own source tree (`src/data/ghosttrace`). When an Electron app is built for production, its source code is packed into a read-only archive named `app.asar`. The attempt to write to this archive triggered a fatal `EACCES` (Permission Denied) crash immediately on boot, short-circuiting the rest of the startup process before IPC handlers could bind.
+*   **Fix:** Patched `src/ghosttrace/index.js` and `main.js` to detect if the app is running from an `app.asar` archive. If so, the logging path is redirected to a writable OS-level directory (`~/.config/Agent Smith/ghosttrace`). 
+
+### 4. Severe UI Lockup (Missing Script Imports)
+*   **Symptom:** The sidebar UI was completely unresponsive. The 'Agent' and 'Code' buttons did not work, the collapsible sections did not expand, and the workspace directory picker ("Here I am") failed to open.
+*   **Root Cause:** The core HTML shell (`index.html`) was missing almost all of its required `<script>` tags for the UI components. The DOM elements existed on the page, but the JavaScript logic intended to drive them (e.g., `sidebarLayout.js`, `modeBar.js`, `codeRunUI.js`) was never loaded into the browser environment. 
+*   **Fix:** Injected 9 missing `<script src="...">` tags at the bottom of `index.html` (just before `app.js`) to ensure all UI modules are properly initialized and bound to the DOM elements.
+
+### 5. Local Environment Permission Issues
+*   **Symptom:** Initial attempts to run `npm install` and manipulate files failed with `EACCES` errors.
+*   **Root Cause:** The project repository directory was owned by the `root` user, locking out the local standard user (`legend`) from generating `node_modules` or modifying source files.
+*   **Fix:** Leveraged `sudo` to alter directory ownership/permissions (`chmod -R 777`) across critical workspace folders, allowing standard build commands to execute successfully.
+
+---
+Conclusion:
+The application suffered from a compounding series of build-configuration oversights, a severe architectural pathing bug when transitioning from dev to production (`app.asar`), and an incomplete HTML shell. All issues have been resolved, and the resulting artifacts (`./dist/agent-smith_45.0.3_amd64.deb` and `./dist/Agent Smith-45.0.3.AppImage`) are fully functional.

@@ -1,0 +1,118 @@
+/**
+ * Browser verify — headless load of project HTML with console error capture.
+ */
+'use strict';
+
+const path = require('path');
+const { pathToFileURL } = require('url');
+const { resolveProjectFile } = require('./previewService.js');
+
+const LOAD_TIMEOUT_MS = 20000;
+
+function getElectron() {
+    try {
+        return require('electron');
+    } catch (e) {
+        return null;
+    }
+}
+
+function createBrowserVerify(deps) {
+    const { projectContext } = deps;
+
+    async function run(opts) {
+        const relPath = opts?.target || opts?.path || 'index.html';
+        const resolved = resolveProjectFile(projectContext, relPath);
+        if (resolved.error) return { pass: false, error: resolved.error, steps: [] };
+
+        const electron = getElectron();
+        const BrowserWindow = electron?.BrowserWindow;
+        if (!BrowserWindow) {
+            return { pass: false, error: 'Browser verify requires Electron.', steps: [] };
+        }
+
+        const fileUrl = pathToFileURL(resolved.absPath).href;
+        const steps = [];
+        const consoleErrors = [];
+        let win;
+
+        try {
+            win = new BrowserWindow({
+                width: 1280,
+                height: 720,
+                show: false,
+                webPreferences: {
+                    nodeIntegration: false,
+                    contextIsolation: true,
+                    sandbox: true
+                }
+            });
+
+            win.webContents.on('console-message', (_e, level, message, line, sourceId) => {
+                if (level >= 2) {
+                    consoleErrors.push({ level, message, line, sourceId });
+                }
+            });
+
+            steps.push({ step: 'load', target: relPath, url: fileUrl });
+
+            await new Promise((resolve, reject) => {
+                const timer = setTimeout(() => reject(new Error('Page load timed out (20s).')), LOAD_TIMEOUT_MS);
+                win.webContents.once('did-finish-load', () => {
+                    clearTimeout(timer);
+                    resolve();
+                });
+                win.webContents.once('did-fail-load', (_ev, _code, desc) => {
+                    clearTimeout(timer);
+                    reject(new Error(desc || 'Page failed to load'));
+                });
+                win.loadURL(fileUrl).catch(reject);
+            });
+
+            await new Promise(r => setTimeout(r, 300));
+
+            const checks = Array.isArray(opts?.checks) ? opts.checks : [];
+            for (const check of checks) {
+                if (typeof check !== 'string' || !check.trim()) continue;
+                try {
+                    const ok = await win.webContents.executeJavaScript(
+                        `(function(){ try { return Boolean(${check}); } catch(e) { return false; } })()`,
+                        true
+                    );
+                    steps.push({ step: 'check', expression: check, pass: !!ok });
+                    if (!ok) {
+                        return {
+                            pass: false,
+                            steps,
+                            consoleErrors,
+                            error: `Check failed: ${check}`
+                        };
+                    }
+                } catch (e) {
+                    steps.push({ step: 'check', expression: check, pass: false, error: e.message });
+                    return { pass: false, steps, consoleErrors, error: e.message };
+                }
+            }
+
+            if (consoleErrors.length) {
+                return {
+                    pass: false,
+                    steps,
+                    consoleErrors,
+                    error: `Console errors: ${consoleErrors.map(e => e.message).slice(0, 3).join('; ')}`
+                };
+            }
+
+            steps.push({ step: 'complete', pass: true });
+            return { pass: true, steps, consoleErrors: [] };
+        } catch (e) {
+            return { pass: false, steps, consoleErrors, error: e.message || String(e) };
+        } finally {
+            if (win && !win.isDestroyed()) win.destroy();
+        }
+    }
+
+    return { run };
+}
+
+module.exports = { createBrowserVerify };
