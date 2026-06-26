@@ -1,143 +1,210 @@
-# Agent Smith — Small-Model Code Agent (v46.11.0)
+<p align="center">
+  <img src="icon.png" alt="Agent Smith" width="96" height="96" />
+</p>
 
-A local-first **coding agent** for small models (7B–35B Gemma/Qwen via LM Studio). Three modes: **Chat** (conversation only), **Agent** (full host control — shell + whole-host files + process management), and **Code Mode** (auto-run build loop with ledger-backed **Revert All**).
+<h1 align="center">Agent Smith</h1>
 
-**Doctrine:** [`SMITH.md`](SMITH.md) · **Code Mode:** [`docs/CODE_MODE.md`](docs/CODE_MODE.md) · **Navigation:** [`AGENTS.md`](AGENTS.md) · **Protocol:** [`PROTOCOL.md`](PROTOCOL.md)
+<p align="center">
+  <strong>Local-first AI coding agent built for small models.</strong><br>
+  Run Gemma, Qwen, and other 7B–35B models through LM Studio — with real tools, real edits, and a safety net you can undo.
+</p>
 
-## What it does
+<p align="center">
+  <a href="https://github.com/GhostWrk/Agent-Smith/releases/tag/v46.11.0"><img src="https://img.shields.io/badge/version-46.11.0-00c853?style=flat-square" alt="Version" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License" /></a>
+  <img src="https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey?style=flat-square" alt="Platforms" />
+  <img src="https://img.shields.io/badge/models-LM%20Studio%20(local)-8b5cf6?style=flat-square" alt="LM Studio" />
+</p>
 
-1. **Code Mode** — describe a task; tools run automatically (read, patch, shell, grep).
-2. **Trust** — every edit snapshotted; review unified diff; **Revert All** restores pre-run state.
-3. **Chat** — ordinary LLM conversation when Code Mode is off.
+<p align="center">
+  <a href="https://github.com/GhostWrk/Agent-Smith/releases/latest"><strong>Download Linux build</strong></a>
+  &nbsp;·&nbsp;
+  <a href="#quick-start">Quick start</a>
+  &nbsp;·&nbsp;
+  <a href="#documentation">Documentation</a>
+  &nbsp;·&nbsp;
+  <a href="CHANGELOG.md">Changelog</a>
+</p>
+
+---
+
+## What is Agent Smith?
+
+**Agent Smith** is a desktop coding assistant that turns a locally hosted language model into a capable build partner. Unlike chat-only UIs, it can **read your project, edit files, run commands, verify results, and show you exactly what changed** — all without sending your code to the cloud.
+
+It is designed for developers who want **privacy, control, and predictable behavior** from smaller open models (7B–35B) that are fast enough to run on consumer hardware.
+
+> Your machine. Your model. Your codebase. Agent Smith stays on your side of the wire.
+
+---
+
+## Why Agent Smith?
+
+| | |
+|---|---|
+| **Runs fully local** | Pair with [LM Studio](https://lmstudio.ai/) — no API keys, no data leaving your machine. |
+| **Built for small models** | Gemma harness, forgiving tool parsing, compact prompts, and auto-tuned runtime profiles so 7B–35B models can actually ship code. |
+| **Three focused modes** | Chat when you only need conversation. Agent when you need the whole machine. Code Mode when you need an autonomous build loop. |
+| **Trust you can verify** | Every edit is snapshotted. Review a unified diff when a run finishes. **Revert All** restores the exact pre-run state. |
+| **Plans that persist** | Non-trivial Code runs write `.agentsmith/PLAN.md` and `IMPLEMENT.md` so long tasks survive restarts. |
+| **Ships with guardrails** | Completion gates, syntax checks, command/path policies, and an audit log — automation with brakes, not blind autopilot. |
+| **Desktop + phone** | Electron app with a frameless UI; optional LAN or tunnel access and a QR code to open the cockpit on your phone. |
+| **Extensible** | Plugin system for custom tools, hooks, and commands ([`docs/PLUGINS.md`](docs/PLUGINS.md)). |
+
+---
+
+## Three operating modes
+
+Agent Smith keeps modes **strictly separated** so chat, host control, and project builds never step on each other.
+
+| Mode | How to enable | Best for |
+|------|---------------|----------|
+| **Chat** | Agent and Code both off | Q&A, brainstorming, conversation — no tools |
+| **Agent** | **AGENT** on | Shell, process control, whole-host file access, web search & fetch — with policy guardrails |
+| **Code** | **CODE MODE** on | Autonomous build loop on your workspace — read, patch, shell, grep, verify, ledger |
+
+**Agent** and **Code** are mutually exclusive by design.
+
+### Code Mode — the build engine
+
+Describe what you want built. Agent Smith plans, implements, runs tests, and grinds toward green — automatically.
+
+- Multi-tool turns with phase gates (explore → implement → verify)
+- Patch-first editing with ledger snapshots before every write
+- Live activity timeline in chat so you see every tool call
+- Completion gate blocks premature "done" on broken output
+- **Revert All** when you want a clean slate
+
+### Agent Mode — your local operator
+
+When you need the model to act across your machine:
+
+- Run shell commands and manage processes
+- Read, write, and delete files anywhere on the host (catastrophic paths blocked by policy)
+- Search the web and fetch pages as text (`web_search`, `fetch_url`)
+- Review and undo consequential actions via the audit log
+
+### Chat Mode — zero friction
+
+Plain LLM streaming when you do not want tools in the loop.
+
+---
+
+## Download
+
+Pre-built **Linux** installers (v46.11.0):
+
+| Format | File | Notes |
+|--------|------|-------|
+| **AppImage** | [`agent-smith-46.11.0.AppImage`](https://github.com/GhostWrk/Agent-Smith/releases/download/v46.11.0/agent-smith-46.11.0.AppImage) | Portable — `chmod +x` and run |
+| **Debian/Ubuntu** | [`agent-smith_46.11.0_amd64.deb`](https://github.com/GhostWrk/Agent-Smith/releases/download/v46.11.0/agent-smith_46.11.0_amd64.deb) | `sudo dpkg -i` then `sudo apt -f install` if needed |
+
+All releases: **[github.com/GhostWrk/Agent-Smith/releases](https://github.com/GhostWrk/Agent-Smith/releases)**
+
+For macOS and Windows, clone the repo and use the quick start below — the launcher handles platform-specific dependencies.
+
+---
 
 ## Quick start
 
-**Easiest — works on Linux, macOS, and Windows (handles install for you):**
+### 1. Get a model running
+
+Load a model in **LM Studio** and serve it at `http://localhost:1234`.
+
+### 2. Launch Agent Smith
+
+**Easiest** — works on Linux, macOS, and Windows:
 
 ```bash
 # Linux / macOS
 bash run.sh
 ```
+
 ```bat
-:: Windows (or just double-click run.cmd)
+:: Windows (or double-click run.cmd)
 run.cmd
 ```
 
-The launcher installs dependencies **for the current machine** on first run — and if you
-copied the project from another OS, it detects the mismatch and reinstalls automatically.
-So you can zip the whole folder and run it on either OS without manual fixes.
+The launcher installs dependencies for **your** platform on first run. If you copied the project from another OS, it detects the mismatch and reinstalls automatically.
 
-**Manual equivalent:**
+**Manual:**
 
 ```bash
 npm install
 npm start
 ```
 
-1. Load a model in **LM Studio** at `http://localhost:1234`
-2. Set workspace via **📍 Here I am**
-3. Enable **CODE MODE** in the sidebar
-4. Describe a coding task → watch tool activity in the chat timeline
-5. Review diff; revert if needed
+### 3. Point it at your project
 
-Headless smoke: `node scripts/code-smoke.js` · greenfield gate: `node scripts/greenfield-smoke.js`
+1. Set your workspace with **📍 Here I am**
+2. Turn on **CODE MODE** in the sidebar
+3. Describe the task — watch the timeline as tools run
+4. Review the diff; hit **Revert All** if you want to roll back
 
-## Sharing with someone on another OS
+**Model tip:** If LM Studio uses just-in-time loading, the model list may look empty at first. Pick your model once in the dropdown — Agent Smith remembers it.
 
-**Do not zip and send `node_modules`.** `esbuild` and `electron` ship platform-native
-binaries, so a `node_modules` built on Windows will not run on Linux/macOS (the renderer
-build fails with a cryptic "esbuild installed for another platform" error and the app
-won't start). Send the **source only** and have the recipient run, on their own machine:
+---
 
-```bash
-npm install          # installs the binaries for THEIR platform
-npm start
-```
+## Feature highlights
 
-To ship an installable Linux build, build it **on Linux** (electron-builder does not
-cross-compile cleanly from Windows):
+**Intelligence & tuning**
+- Runtime auto-tune — model-aware context and temperature profiles ([`docs/RUNTIME_PROFILE.md`](docs/RUNTIME_PROFILE.md))
+- Gemma harness — system folding and tool JSON preamble for small-model reliability
+- Zero-setup cockpit — Build Mode plans then grinds to green; Hardware Guard shows live RAM/VRAM/GPU
+
+**Safety & trust**
+- Change ledger with byte-exact **Revert All**
+- Agent action log — review and undo file writes and deletes
+- `commandPolicy` and `pathPolicy` refuse catastrophic shell and filesystem targets
+
+**Workflow**
+- Live preview panel for web projects
+- Headless `browser_verify` for HTML acceptance checks in Code Mode
+- Durable `.agentsmith/` artifacts for multi-step missions
+- Optional WhatsApp linking and phone QR for remote cockpit access
+
+**Polish**
+- Frameless desktop shell with custom window controls
+- Official Linux desktop entry via `npm run install-desktop`
+- Matrix-inspired UI with a modern card overlay
+
+---
+
+## Documentation
+
+| Doc | Purpose |
+|-----|---------|
+| [`SMITH.md`](SMITH.md) | Product doctrine and design law |
+| [`docs/CODE_MODE.md`](docs/CODE_MODE.md) | Code Mode deep dive |
+| [`AGENTS.md`](AGENTS.md) | Repo map for contributors and AI assistants |
+| [`PROTOCOL.md`](PROTOCOL.md) | Protocol and security detail |
+| [`docs/architecture.md`](docs/architecture.md) | System layout |
+| [`docs/PLUGINS.md`](docs/PLUGINS.md) | Plugin development |
+| [`CHANGELOG.md`](CHANGELOG.md) | Release history |
+
+---
+
+## For developers
+
+### Build from source
 
 ```bash
 npm install
-npm run dist         # → AppImage + .deb in release/
-npm run install-desktop   # optional: app-menu launcher + correct taskbar icon on Linux
+npm run build:renderer
+npm start
 ```
 
-`npm run dist` requires `author` in `package.json` (used for the `.deb` maintainer field).
+### Linux packages
 
-The desktop app uses a **frameless** window with custom minimize/maximize/close controls on the top-right.
-
-### Why Linux installs used to fail
-
-The core app has **no native build steps** — `bcryptjs`, `fast-glob`, `marked`, etc. are
-pure JS, and `esbuild`/`electron` ship prebuilt binaries for every platform. The thing
-that broke `npm install` on Linux was the **optional** WhatsApp feature: `whatsapp-web.js`
-pulls in **puppeteer**, whose postinstall downloads ~150 MB of Chromium and needs Linux
-system libraries (`libgbm`, `libnss3`, …). That is now an **optional dependency**, so a
-normal install no longer pulls it and can't fail on it:
+Build on Linux (electron-builder does not cross-compile cleanly from Windows):
 
 ```bash
-npm install                 # lean, no Chromium — works on a clean Linux box
-# WhatsApp linking is opt-in (needs Chromium + system libs):
-npm install whatsapp-web.js qrcode
+npm install
+npm run dist              # → AppImage + .deb in release/
+npm run install-desktop   # optional: app-menu launcher + taskbar icon
 ```
 
-If you want to be certain optional deps are skipped (e.g. CI), use `npm install --omit=optional`.
-
-## Operating modes
-
-| Mode | Toggle | Use for |
-|------|--------|---------|
-| **Chat** | Both off | Q&A, conversation (no tools) |
-| **Agent** | AGENT on | Full host control in chat — shell, whole-host file read/write/delete, process management, and web search/fetch (read-only). Catastrophic targets guarded by `pathPolicy`/`commandPolicy` |
-| **Code** | CODE MODE on | Auto-run **build** tools on your project (write, patch, ledger) |
-
-Agent and Code are **mutually exclusive** — enabling one disables the other.
-
-## What Agent Mode can do
-
-Agent Mode acts on your behalf across your computer and the web:
-
-- **Whole-host control** — run shell commands, manage processes, and read/write/delete files anywhere (not just the project), with `pathPolicy`/`commandPolicy` refusing catastrophic targets.
-- **Web read** — `web_search` to search the internet and `fetch_url` to read a page or API as text (read-only; no interactive browsing).
-- **Trust layer** — every consequential action is logged; reversible ones (file writes/deletes) can be undone by asking the agent to `review_actions` / `undo_action`.
-
-> **Model tip:** Agent/Chat both need a model served by LM Studio. If LM Studio uses Just‑In‑Time loading, the model list can be empty; pick your model once in the dropdown and the app remembers it.
-
-## Highlights
-
-- **Code loop** — `src/code/` multi-tool turns, extractor, budget, early stop
-- **Gemma harness** — system folding, tool JSON preamble
-- **Edit engine** — patch-first; ledger snapshots before every write
-- **Completion gate** — syntax + truncation checks before a run can finish; immediate warnings on write
-- **Plugin system** — extend chat hooks/commands ([`docs/PLUGINS.md`](docs/PLUGINS.md))
-- **Mobile web UI** — LAN access; optional Cloudflare tunnel. The 📱 button in the composer shows a scannable QR (REMOTE/LAN badge) to open Agent Smith on your phone
-- **Runtime auto-tune** — model-aware context/temperature profiles, on by default; manual sliders under **ADVANCED → TUNING** only when Auto-tune is off ([`docs/RUNTIME_PROFILE.md`](docs/RUNTIME_PROFILE.md))
-- **Zero-setup cockpit** — Build Mode always plans then grinds to green; an always-visible compact Hardware Guard shows live RAM/VRAM/GPU with a one-click GPU reset
-- **Trust layer** — Agent Mode records file writes/deletes to an audit log you can review and undo
-- **Frameless desktop** — edge-to-edge UI with custom window controls; official taskbar icon via `npm run install-desktop` (Linux)
-
-### Removed in v46.11 (migrating from older docs)
-
-Interactive **live browser automation**, the **Credential Vault**, and **persistent chat watchers** are gone (and their `browser_*` / `vault_*` / `watch_chat_*` tools). Still supported: Code Mode **`browser_verify`** (headless HTML check), **`show_preview`**, Agent **`web_search` / `fetch_url`**, and optional **WhatsApp** linking. See [`CHANGELOG.md`](CHANGELOG.md) (v46.11.0).
-
-## Project layout
-
-Electron keeps a thin **shell at the repo root**; application code lives under `src/`:
-
-| Location | Contents |
-|----------|----------|
-| **Root** | `main.js`, `preload.js`, `index.html`, `icon.png` — Electron entry + HTML shell |
-| **`src/renderer/`** | UI modules, `app.js` (DOM wiring), `styles/`, esbuild entry → `dist/renderer/bundle.js` |
-| **`src/main/`** | Main-process services + IPC handlers |
-| **`src/code/`** | Code Mode engine (orchestrator, tools, completion gate) |
-| **`src/shared/`** | Cross-process helpers (IPC channels, command policy, persona) |
-| **`tests/`** | Unit/integration tests |
-| **`docs/`** | Architecture, Code Mode, plugins, harness notes |
-
-Legacy session paths may still use the **xkaliber** prefix in app data (previous product name); that is intentional for upgrade compatibility.
-
-## Verification
+### Verification
 
 ```bash
 npm test
@@ -146,19 +213,34 @@ node scripts/verify-main-ipc.js
 npm run build:renderer
 ```
 
-## Key paths
+### Project layout
 
 | Path | Role |
 |------|------|
-| `src/code/loop/runCodeTask.js` | Code Mode orchestrator |
-| `src/code/tools/executor.js` | Tool dispatch + ledger |
-| `src/main/ipc/code.js` | `code-run`, `code-stop`, `code-event` |
-| `src/main/services/changeLedger.js` | Snapshots + revert |
-| `src/renderer/app.js` | DOM shell: auth, chat, mode toggles, sidebar |
-| `src/renderer/styles/base.css` | Matrix terminal theme |
-| `src/renderer/styles/overlay.css` | Card-based UI overlay |
-| `src/renderer/modes/` | Chat/Code mode isolation |
-| `scripts/` | Build, ship-check, IPC verify, standalone server |
-| `docs/` | Architecture, Code Mode, plugins |
-| `tests/` | Unit/integration tests (`npm test`) |
-| `dist/renderer/bundle.js` | Generated renderer bundle (do not edit by hand) |
+| `src/code/` | Code Mode engine — turn loop, tools, completion gate |
+| `src/main/` | Electron main process — services and IPC |
+| `src/renderer/` | UI — chat, sidebar, timeline, mode toggles |
+| `src/shared/` | Cross-process helpers — policies, channels, persona |
+| `tests/` | Unit and integration tests |
+| `docs/` | Architecture, harness, and mode documentation |
+
+### Sharing across operating systems
+
+**Do not zip `node_modules`.** Native binaries (`esbuild`, `electron`) are platform-specific. Send source only; recipients run `npm install` on their machine.
+
+Optional WhatsApp deps (`whatsapp-web.js`, Puppeteer/Chromium) are **opt-in** — a lean `npm install` works on a clean Linux box:
+
+```bash
+npm install                 # no Chromium
+npm install whatsapp-web.js qrcode   # only if you want WhatsApp linking
+```
+
+---
+
+## License
+
+MIT — see [`LICENSE`](LICENSE).
+
+<p align="center">
+  <sub>Agent Smith v46.11.0 · Built for local models, built for builders.</sub>
+</p>
