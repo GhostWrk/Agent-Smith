@@ -31,8 +31,6 @@ Code Mode tool definitions: [`src/code/tools/schemas.js`](src/code/tools/schemas
 Command safety: [`src/shared/commandPolicy.js`](src/shared/commandPolicy.js); file-mutation safety (Agent whole-host): [`src/shared/pathPolicy.js`](src/shared/pathPolicy.js); Code-Mode path containment: `projectContext.resolvePath`.
 Agent Mode trust layer (audit + undo): [`src/main/services/actionLog.js`](src/main/services/actionLog.js) → IPC [`src/main/ipc/actions.js`](src/main/ipc/actions.js). Every consequential action is logged; reversible ones can be undone via `undo_action`/`review_actions` or the sidebar **📋 AGENT ACTIONS** panel.
 
-> Removed (post‑46.9.0): live browser automation (`agentBrowser`), the Credential Vault (`credentialVault`), and persistent chat watchers (`chatWatcher`) — along with their `browser_*`/`vault_*`/`watch_chat_*` tools and `agent-browser-*`/`vault-*`/`chatwatch-*` IPC channels. (`browser_verify` in Code Mode is a separate headless HTML check and remains.)
-
 Agent Mode end-to-end checks: `node scripts/agent-e2e.js` (every agent tool vs real OS) · `node scripts/agent-live-e2e.js` (real model drives tools via LM Studio).
 
 ## Plugins
