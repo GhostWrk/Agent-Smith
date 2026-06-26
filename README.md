@@ -14,6 +14,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License" /></a>
   <img src="https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey?style=flat-square" alt="Platforms" />
   <img src="https://img.shields.io/badge/models-LM%20Studio%20(local)-8b5cf6?style=flat-square" alt="LM Studio" />
+  <img src="https://img.shields.io/badge/memory-Ollama%20all--minilm-00c853?style=flat-square" alt="Ollama all-minilm memory" />
 </p>
 
 <p align="center">
@@ -44,6 +45,7 @@ It is designed for developers who want **privacy, control, and predictable behav
 |---|---|
 | **Runs fully local** | Pair with [LM Studio](https://lmstudio.ai/) — no API keys, no data leaving your machine. |
 | **Built for small models** | Gemma harness, forgiving tool parsing, compact prompts, and auto-tuned runtime profiles so 7B–35B models can actually ship code. |
+| **Smart persistent memory** | Independent vector memory powered by Ollama embeddings. Install `all-minilm` once and embedded memory features work automatically. |
 | **Three focused modes** | Chat when you only need conversation. Agent when you need the whole machine. Code Mode when you need an autonomous build loop. |
 | **Trust you can verify** | Every edit is snapshotted. Review a unified diff when a run finishes. **Revert All** restores the exact pre-run state. |
 | **Plans that persist** | Non-trivial Code runs write `.agentsmith/PLAN.md` and `IMPLEMENT.md` so long tasks survive restarts. |
@@ -111,7 +113,17 @@ For macOS and Windows, clone the repo and use the quick start below — the laun
 
 Load a model in **LM Studio** and serve it at `http://localhost:1234`.
 
-### 2. Launch Agent Smith
+### 2. Enable embedded memory
+
+Agent Smith uses an independent Ollama-powered vector memory for smart persistent recall. Install the embedding model once:
+
+```bash
+ollama pull all-minilm
+```
+
+As long as that model is installed, embedded memory features work automatically.
+
+### 3. Launch Agent Smith
 
 **Easiest** — works on Linux, macOS, and Windows:
 
@@ -134,7 +146,7 @@ npm install
 npm start
 ```
 
-### 3. Point it at your project
+### 4. Point it at your project
 
 1. Set your workspace with **📍 Here I am**
 2. Turn on **CODE MODE** in the sidebar
@@ -150,6 +162,7 @@ npm start
 **Intelligence & tuning**
 - Runtime auto-tune — model-aware context and temperature profiles ([`docs/RUNTIME_PROFILE.md`](docs/RUNTIME_PROFILE.md))
 - Gemma harness — system folding and tool JSON preamble for small-model reliability
+- Smart persistent memory — Ollama `all-minilm` embeddings provide local vector recall without cloud services
 - Zero-setup cockpit — Build Mode plans then grinds to green; Hardware Guard shows live RAM/VRAM/GPU
 
 **Safety & trust**
