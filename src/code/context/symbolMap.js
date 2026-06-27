@@ -1,9 +1,9 @@
 /**
  * Lightweight "code map" for Code Mode — a ranked, signature-level index of the
  * project's key symbols, injected into the first-turn bootstrap so a small model can
- * locate relevant code WITHOUT reading the whole tree. Inspired by aider's repo map,
- * but dependency-free (regex extraction, local-heuristic ranking — no tree-sitter,
- * no graph). Bounded and synchronous so it's a fast one-time cost at session start.
+ * locate relevant code WITHOUT reading the whole tree. Dependency-free (regex
+ * extraction, local-heuristic ranking — no tree-sitter, no graph). Bounded and
+ * synchronous so it's a fast one-time cost at session start.
  *
  * Greenfield projects (no source files yet) yield '' — additive, never harmful.
  * Code Mode only.

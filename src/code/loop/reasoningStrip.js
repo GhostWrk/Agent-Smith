@@ -5,8 +5,8 @@
 // Some small "reasoning" models don't use the OpenAI reasoning_content field — they
 // emit their thinking inline in the content as <think>...</think> (or <thinking>...).
 // If that reaches the edit/tool parser it pollutes the output (the model's real tool
-// call or file body is buried in, or confused with, the reasoning). Aider strips a
-// configurable reasoning tag before parsing edits; we do the same for Code Mode.
+// call or file body is buried in, or confused with, the reasoning), so Code Mode
+// strips the reasoning tag from content before parsing edits/tool calls.
 //
 // Returns { text, hadReasoning }:
 //   - complete <think>...</think> blocks are removed
