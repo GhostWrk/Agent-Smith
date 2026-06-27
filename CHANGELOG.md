@@ -1,5 +1,12 @@
 # Agent Smith Changelog
 
+## [46.12.3] - 2026-06-27 — Code Mode: no-progress early stop
+
+Code Mode only — Chat and Agent Mode behavior is unchanged.
+
+### Fixed
+- **Runs no longer burn all 40 turns doing nothing.** Code Mode is a build/edit loop, but its early-stop only caught tool *errors* (5) and *duplicate* calls (8). A model that explored read-only every turn (read_file/grep/list) never tripped either and ground to the max-turn limit having written zero files — reported as UNVERIFIED. Added a no-progress guard: if no file is written for N consecutive turns (default 12, override with `XK_CODE_MAX_NOWRITE_TURNS`), the run stops early with an honest message — suggesting Chat/Agent mode for analysis/Q&A, or restating the task as a concrete build/edit. Writing a file resets the counter, so legitimate exploration-before-writing is unaffected.
+
 ## [46.12.2] - 2026-06-27 — Code Mode: generic (de-gamed) file-recovery nudges
 
 Code Mode only — Chat and Agent Mode behavior is unchanged.

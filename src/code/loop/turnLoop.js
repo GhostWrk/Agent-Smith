@@ -301,6 +301,15 @@ async function runTurnLoop(ctx) {
             break;
         }
 
+        // No-progress backstop: stop early if the run keeps taking turns (e.g. read-only
+        // exploration) without ever writing a file, instead of burning all 40 turns.
+        const progressCheck = earlyStop.onProgress(new Set(session.filesTouched || []).size);
+        if (progressCheck.stop) {
+            emit({ type: 'error', code: 'NO_PROGRESS', message: progressCheck.reason });
+            exitReason = progressCheck.reason;
+            break;
+        }
+
         session.turn++;
         dedup.reset();
 
