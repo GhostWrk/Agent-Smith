@@ -14,7 +14,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License" /></a>
   <img src="https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey?style=flat-square" alt="Platforms" />
   <img src="https://img.shields.io/badge/models-LM%20Studio%20(local)-8b5cf6?style=flat-square" alt="LM Studio" />
-  <img src="https://img.shields.io/badge/memory-Ollama%20all--minilm-00c853?style=flat-square" alt="Ollama all-minilm memory" />
+  <img src="https://img.shields.io/badge/memory-LM%20Studio%20embeddings-00c853?style=flat-square" alt="LM Studio embeddings memory" />
 </p>
 
 <p align="center">
@@ -45,7 +45,7 @@ It is designed for developers who want **privacy, control, and predictable behav
 |---|---|
 | **Runs fully local** | Pair with [LM Studio](https://lmstudio.ai/) — no API keys, no data leaving your machine. |
 | **Built for small models** | Gemma harness, forgiving tool parsing, compact prompts, and auto-tuned runtime profiles so 7B–35B models can actually ship code. |
-| **Smart persistent memory** | Independent vector memory powered by Ollama embeddings. Install `all-minilm` once and embedded memory features work automatically. |
+| **Smart persistent memory** | Local embedding-backed memory for recall across runs. Load an embedding model in LM Studio alongside your chat/code model before using memory features. |
 | **Three focused modes** | Chat when you only need conversation. Agent when you need the whole machine. Code Mode when you need an autonomous build loop. |
 | **Trust you can verify** | Every edit is snapshotted. Review a unified diff when a run finishes. **Revert All** restores the exact pre-run state. |
 | **Plans that persist** | Non-trivial Code runs write `.agentsmith/PLAN.md` and `IMPLEMENT.md` so long tasks survive restarts. |
@@ -109,21 +109,18 @@ For macOS and Windows, clone the repo and use the quick start below — the laun
 
 ## Quick start
 
-### 1. Get a model running
+### 1. Load your local models in LM Studio
 
-Load a model in **LM Studio** and serve it at `http://localhost:1234`.
+Open **LM Studio** and start the local server at `http://localhost:1234`.
 
-### 2. Enable embedded memory
+Load both models before launching Agent Smith:
 
-Agent Smith uses an independent Ollama-powered vector memory for smart persistent recall. Install the embedding model once:
+1. A chat/code model, such as Gemma or Qwen.
+2. A local embedding model for memory/search.
 
-```bash
-ollama pull all-minilm
-```
+Keep LM Studio running while Agent Smith is open. No cloud API key is required.
 
-As long as that model is installed, embedded memory features work automatically.
-
-### 3. Launch Agent Smith
+### 2. Launch Agent Smith
 
 **Easiest** — works on Linux, macOS, and Windows:
 
@@ -146,7 +143,7 @@ npm install
 npm start
 ```
 
-### 4. Point it at your project
+### 3. Point it at your project
 
 1. Set your workspace with **📍 Here I am**
 2. Turn on **CODE MODE** in the sidebar
@@ -155,6 +152,8 @@ npm start
 
 **Model tip:** If LM Studio uses just-in-time loading, the model list may look empty at first. Pick your model once in the dropdown — Agent Smith remembers it.
 
+**Memory tip:** If memory or recall says embeddings are unavailable, return to LM Studio and confirm the embedding model is loaded and the local server is still running.
+
 ---
 
 ## Feature highlights
@@ -162,7 +161,7 @@ npm start
 **Intelligence & tuning**
 - Runtime auto-tune — model-aware context and temperature profiles ([`docs/RUNTIME_PROFILE.md`](docs/RUNTIME_PROFILE.md))
 - Gemma harness — system folding and tool JSON preamble for small-model reliability
-- Smart persistent memory — Ollama `all-minilm` embeddings provide local vector recall without cloud services
+- Smart persistent memory — local embeddings provide recall without cloud services; load the embedding model in LM Studio before using memory features
 - Zero-setup cockpit — Build Mode plans then grinds to green; Hardware Guard shows live RAM/VRAM/GPU
 
 **Safety & trust**
