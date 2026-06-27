@@ -40,7 +40,64 @@ module.exports = function registerAgentIpc(ipcMain, deps) {
         return null;
     }
 
-    ipcMain.handle('agent-run-command', async (event, command, isBackground, planId) => {
+    // True when the agent asked to run something elevated AND supplied a sudo
+    // password. We only auto-elevate a LEADING `sudo` — the one safe case, since
+    // the whole command body runs under a single sudo invocation with the
+    // password on its stdin. Mid-command sudo (e.g. `echo x | sudo tee`) is left
+    // for the user to run; auto-injecting the password there is unsafe.
+    const SUDO_PREFIX_RE = /^\s*sudo\s+(-\S+\s+)*?/;
+
+    function stripSudoPrefix(command) {
+        return String(command).replace(SUDO_PREFIX_RE, '');
+    }
+
+    // Spawn `sudo -S <shell> -c <command>` with the password on stdin. No shell
+    // wraps the password, so it cannot be injected and never appears in ps/proc
+    // as an `echo` argument. The command body still runs under the user's shell
+    // so pipes/redirects inside it behave normally.
+    function spawnSudoShell(command, cwd, sudoPass) {
+        const cfg = projectContext.getShellConfig();
+        const inner = stripSudoPrefix(command);
+        const child = spawn('sudo', ['-S', cfg.shell, cfg.flag, inner], {
+            cwd, stdio: ['pipe', 'pipe', 'pipe']
+        });
+        // sudo -S reads the password until the first newline, then hands the
+        // pipe to the command. End stdin so interactive prompts can't hang.
+        try { child.stdin.write(sudoPass + '\n'); child.stdin.end(); } catch {}
+        return child;
+    }
+
+    function runSudoForeground(command, cwd, sudoPass, timeoutMs) {
+        return new Promise((resolve) => {
+            const MAX = 50 * 1024 * 1024;
+            let stdout = '', stderr = '', timedOut = false, tooBig = false;
+            const child = spawnSudoShell(command, cwd, sudoPass);
+            const timer = setTimeout(() => { timedOut = true; child.kill('SIGKILL'); }, timeoutMs);
+            const onOut = (d) => {
+                if (stdout.length < MAX) stdout += d.toString();
+                else if (!tooBig) { tooBig = true; stderr += '\n[stdout truncated at 50MB]'; }
+            };
+            const onErr = (d) => { if (stderr.length < MAX) stderr += d.toString(); };
+            child.stdout.on('data', onOut);
+            child.stderr.on('data', onErr);
+            child.on('error', (err) => {
+                clearTimeout(timer);
+                resolve({ error: `Failed to spawn sudo: ${err.message}`, stdout, stderr });
+            });
+            child.on('close', (code) => {
+                clearTimeout(timer);
+                if (timedOut) {
+                    resolve({ error: `Command timed out after ${timeoutMs / 1000}s and was killed. To open a GUI app (browser/editor) or run a long task (server/build/watcher), call run_shell_command with is_background:true.`, stdout, stderr });
+                } else if (code !== 0) {
+                    resolve({ error: `sudo exited with code ${code}`, stdout, stderr });
+                } else {
+                    resolve({ error: null, stdout, stderr });
+                }
+            });
+        });
+    }
+
+    ipcMain.handle('agent-run-command', async (event, command, isBackground, planId, sudoPass = '') => {
         const pid = planId || state.currentPlanId;
         const cwd = projectContext.getRoot();
 
@@ -48,11 +105,15 @@ module.exports = function registerAgentIpc(ipcMain, deps) {
         if (!verdict.allowed) {
             return { error: blockedResult(command, verdict.reason).error };
         }
+        // Log the agent's command as-is. The password travels out-of-band via
+        // sudoPass and is never embedded in `command`, so the ledger stays clean.
         logAction({ type: 'shell', summary: String(command).slice(0, 200), detail: cwd });
+
+        const useSudo = !!sudoPass && !projectContext.isWindows() && SUDO_PREFIX_RE.test(String(command));
 
         if (isBackground) {
             const jobId = nextJobId++;
-            const child = spawnShell(command, cwd, true);
+            const child = useSudo ? spawnSudoShell(command, cwd, sudoPass) : spawnShell(command, cwd, true);
             if (!child) {
                 return { error: 'Failed to spawn background process' };
             }
@@ -85,14 +146,19 @@ module.exports = function registerAgentIpc(ipcMain, deps) {
             return { stdout: `Process started in background. Job ID: ${jobId}. Use read_process_log to check status, stop_process to kill it.` };
         }
 
+        // Foreground timeout so a command the model forgot to background (e.g. a dev
+        // server) fails fast instead of hanging the whole turn. Long builds should use
+        // is_background:true.
+        // 90s, not 5min: a foreground command that blocks (GUI app, server, watcher)
+        // should fail fast instead of freezing the whole turn for minutes. GUI launches
+        // and long tasks belong in is_background:true (returns instantly with a job id).
+        const FG_TIMEOUT_MS = 90000;
+
+        if (useSudo) {
+            return runSudoForeground(command, cwd, sudoPass, FG_TIMEOUT_MS);
+        }
+
         return new Promise((resolve) => {
-            // Foreground timeout so a command the model forgot to background (e.g. a dev
-            // server) fails fast instead of hanging the whole turn. Long builds should use
-            // is_background:true.
-            // 90s, not 5min: a foreground command that blocks (GUI app, server, watcher)
-            // should fail fast instead of freezing the whole turn for minutes. GUI launches
-            // and long tasks belong in is_background:true (returns instantly with a job id).
-            const FG_TIMEOUT_MS = 90000;
             const onDone = (error, stdout, stderr) => {
                 if (error && error.killed) {
                     resolve({ error: `Command timed out after ${FG_TIMEOUT_MS / 1000}s and was killed. To open a GUI app (browser/editor) or run a long task (server/build/watcher), call run_shell_command with is_background:true.`, stdout, stderr });

@@ -339,12 +339,12 @@ TOOL PROTOCOL: To use a tool, emit a real function/tool call via the native tool
         const a = args || {};
 
         if (name === 'run_shell_command') {
-            let cmd = a.command;
+            const cmd = a.command;
+            // Password is forwarded as a discrete IPC arg so the main process can
+            // feed it to sudo's stdin via spawn — NEVER interpolated into the shell
+            // string (avoids injection, ps/proc exposure, and history/audit leaks).
             const sudoPass = deps.getSudoPassword?.() || '';
-            if (cmd && cmd.includes('sudo') && sudoPass) {
-                cmd = cmd.replace(/sudo\s+/g, `echo "${sudoPass}" | sudo -S `);
-            }
-            const res = await api.invoke('agent-run-command', cmd, !!a.is_background);
+            const res = await api.invoke('agent-run-command', cmd, !!a.is_background, undefined, sudoPass);
             let out = '';
             if (res.error) out += `Error: ${res.error}\n`;
             if (res.stderr) out += `Stderr: ${res.stderr}\n`;
