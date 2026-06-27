@@ -7,6 +7,7 @@ const https = require('https');
 const http = require('http');
 const { normalizeLlmBaseUrl } = require('../../shared/netGuard.js');
 const { tryParseJson } = require('../tools/jsonRepair.js');
+const { stripInlineReasoning } = require('./reasoningStrip.js');
 
 function apiBase(base) {
     return normalizeLlmBaseUrl(base);
@@ -125,9 +126,11 @@ async function streamCompletion({
                     // timeline's "Reasoning" panel. Display-only — NOT added to `content`,
                     // so it isn't re-sent to the model. Without this, Code Mode looks frozen
                     // while a reasoning model (qwen3 etc.) thinks, and reasoning never traces.
-                    if (delta.reasoning_content) {
+                    // Some servers use `reasoning_content`, others `reasoning`.
+                    const reasoningDelta = delta.reasoning_content || delta.reasoning;
+                    if (reasoningDelta) {
                         sawReasoning = true;
-                        if (onDelta) onDelta(delta.reasoning_content);
+                        if (onDelta) onDelta(reasoningDelta);
                     }
                     if (delta.tool_calls) {
                         for (const tc of delta.tool_calls) {
@@ -150,8 +153,13 @@ async function streamCompletion({
                     const args = r.ok && r.value && typeof r.value === 'object' ? r.value : {};
                     return { id: tc.id, type: 'function', function: { name: tc.function.name, arguments: args } };
                 });
+                // Strip inline <think>...</think> reasoning that some small models emit
+                // in content (vs the reasoning_content field) so it never reaches the
+                // edit/tool parser. Flag it so the reasoning-truncation guard still fires.
+                const stripped = stripInlineReasoning(content);
+                if (stripped.hadReasoning) sawReasoning = true;
                 finish(resolve, {
-                    message: { role: 'assistant', content, tool_calls: toolCalls.length ? toolCalls : undefined },
+                    message: { role: 'assistant', content: stripped.text, tool_calls: toolCalls.length ? toolCalls : undefined },
                     finishReason,
                     sawReasoning
                 });
