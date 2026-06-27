@@ -33,30 +33,68 @@ class MemoryManager {
         this.vectorDBPath = path.join(this.userDataPath, 'xkaliber_vectors_v29.json');
         this.vectors = this.loadJSON(this.vectorDBPath, []);
         
-        // Always strictly route embeddings through Ollama
-        this.ollamaUrl = 'http://127.0.0.1:11434/api';
-        this.gpuVendor = 'GENERIC';
-        // Fallback embeddings endpoint (the configured OpenAI-compatible LLM server),
-        // used when Ollama is unreachable — common for LM-Studio-only setups.
+        // Memory embeddings are served by LM Studio's OpenAI-compatible /v1/embeddings
+        // endpoint. Load an embedding model in LM Studio and keep its local server
+        // running; the base URL is supplied via setLlmBase() at startup.
         this.llmEmbeddingBase = null;
-        this.embeddingModel = 'text-embedding-ada-002';
+        // Embedding model id. null => auto-detect the loaded embedding model from
+        // LM Studio's /v1/models. Override with XK_EMBED_MODEL or setEmbeddingModel().
+        this.embeddingModel = process.env.XK_EMBED_MODEL || null;
+        this.gpuVendor = 'GENERIC';
+        // Optional legacy fallback only, used if it happens to be running. NOT required.
+        this.ollamaUrl = 'http://127.0.0.1:11434/api';
     }
 
     setLlmBase(url) {
         this.llmEmbeddingBase = url || null;
     }
 
-    // OpenAI-compatible /v1/embeddings fallback. Returns the vector or null.
-    async openAiEmbed(text) {
-        if (!this.llmEmbeddingBase) return null;
+    setEmbeddingModel(model) {
+        this.embeddingModel = model || null;
+    }
+
+    // Resolve which embedding model id to request from LM Studio. Prefers an explicit
+    // override (XK_EMBED_MODEL / setEmbeddingModel), otherwise auto-detects an
+    // embedding-capable model loaded in LM Studio via /v1/models and caches it.
+    async resolveEmbeddingModel(base) {
+        if (this.embeddingModel) return this.embeddingModel;
         try {
             const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 8000);
+            const resp = await fetch(`${base}/v1/models`, {
+                headers: { 'Authorization': 'Bearer lm-studio' },
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+            if (resp.ok) {
+                const data = await resp.json();
+                const ids = (data.data || []).map(m => m && m.id).filter(Boolean);
+                const embed = ids.find(id => /embed|minilm|bge|nomic|gte|e5|sentence/i.test(id));
+                if (embed) {
+                    this.embeddingModel = embed; // cache for subsequent calls
+                    return embed;
+                }
+            }
+        } catch (e) { /* fall through to default below */ }
+        // Last resort: most LM Studio builds route /v1/embeddings to the loaded
+        // embedding model regardless of this id.
+        return 'text-embedding-ada-002';
+    }
+
+    // PRIMARY embedding path: LM Studio's OpenAI-compatible /v1/embeddings.
+    // Returns the vector, or null if LM Studio is unreachable or has no embedding
+    // model loaded.
+    async openAiEmbed(text) {
+        if (!this.llmEmbeddingBase) return null;
+        const base = String(this.llmEmbeddingBase).replace(/\/+$/, '').replace(/\/(v1|api)$/, '');
+        try {
+            const model = await this.resolveEmbeddingModel(base);
+            const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 15000);
-            const base = String(this.llmEmbeddingBase).replace(/\/+$/, '').replace(/\/(v1|api)$/, '');
             const resp = await fetch(`${base}/v1/embeddings`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer lm-studio' },
-                body: JSON.stringify({ input: text, model: this.embeddingModel }),
+                body: JSON.stringify({ input: text, model }),
                 signal: controller.signal
             });
             clearTimeout(timeoutId);
@@ -99,6 +137,15 @@ class MemoryManager {
     }
 
     async getEmbedding(text) {
+        // PRIMARY: LM Studio /v1/embeddings (load an embedding model in LM Studio).
+        const lmResult = await this.openAiEmbed(text);
+        if (lmResult) return lmResult;
+        // OPTIONAL legacy fallback: Ollama, only if it happens to be running. NOT required.
+        return await this.ollamaEmbed(text);
+    }
+
+    // Optional legacy fallback. Returns the vector or null. Ollama is NOT required for memory.
+    async ollamaEmbed(text) {
         const performEmbed = async (retryOnFailure = true) => {
             try {
                 const controller = new AbortController();
@@ -139,10 +186,7 @@ class MemoryManager {
             }
         };
 
-        const ollamaResult = await performEmbed();
-        if (ollamaResult) return ollamaResult;
-        // Ollama unreachable/failed → try the configured LLM's /v1/embeddings.
-        return await this.openAiEmbed(text);
+        return await performEmbed();
     }
 
     async pullModel(model) {
@@ -197,12 +241,12 @@ class MemoryManager {
             this.saveJSON(this.vectorDBPath, this.vectors);
             return { success: true };
         }
-        return { success: false, error: "Embedding failed. Ensure Ollama is running in the background with the all-minilm model." };
+        return { success: false, error: "Embedding failed. In LM Studio, load an embedding model and keep the local server running." };
     }
 
     async queryVectors(queryText, limit = 5) {
         const queryEmbedding = await this.getEmbedding(queryText);
-        if (!queryEmbedding) return { success: false, error: "Embedding failed." };
+        if (!queryEmbedding) return { success: false, error: "Embedding failed. In LM Studio, load an embedding model and keep the local server running." };
 
         const results = this.vectors.map(v => ({
             ...v,

@@ -74,15 +74,43 @@ async function run() {
 
 function syncAppVersion() {
   const pkg = require(path.join(__dirname, '..', 'package.json'));
-  const htmlPath = path.join(__dirname, '..', 'index.html');
-  let html = fs.readFileSync(htmlPath, 'utf8');
+  const root = path.join(__dirname, '..');
   const ver = `v${pkg.version}`;
+
+  // 1. UI version badge in index.html (the in-app display).
+  const htmlPath = path.join(root, 'index.html');
+  let html = fs.readFileSync(htmlPath, 'utf8');
   html = html.replace(
     /(<span id="app-version" class="as-version">)v[^<]+(<\/span>)/,
     `$1${ver}$2`
   );
   fs.writeFileSync(htmlPath, html);
   console.log(`[build-renderer] synced #app-version → ${ver}`);
+
+  // 2. README badges/links/footer — keep documentation derived from package.json so
+  //    the external release label and the in-app version never drift apart. Each
+  //    pattern is anchored to distinctive surrounding text so only version digits
+  //    are touched. Written only when something actually changed.
+  syncReadmeVersion(root, pkg.version);
+}
+
+function syncReadmeVersion(root, version) {
+  const readmePath = path.join(root, 'README.md');
+  if (!fs.existsSync(readmePath)) return;
+  const before = fs.readFileSync(readmePath, 'utf8');
+  const v = String(version);
+  const after = before
+    .replace(/(badge\/version-)\d+\.\d+\.\d+/g, `$1${v}`)
+    .replace(/(releases\/tag\/v)\d+\.\d+\.\d+/g, `$1${v}`)
+    .replace(/(releases\/download\/v)\d+\.\d+\.\d+/g, `$1${v}`)
+    .replace(/(agent-smith-)\d+\.\d+\.\d+(\.AppImage)/g, `$1${v}$2`)
+    .replace(/(agent-smith_)\d+\.\d+\.\d+(_amd64\.deb)/g, `$1${v}$2`)
+    .replace(/(installers \(v)\d+\.\d+\.\d+(\))/g, `$1${v}$2`)
+    .replace(/(Agent Smith v)\d+\.\d+\.\d+/g, `$1${v}`);
+  if (after !== before) {
+    fs.writeFileSync(readmePath, after);
+    console.log(`[build-renderer] synced README version → v${v}`);
+  }
 }
 
 run().catch((err) => {

@@ -7,7 +7,6 @@ const fs = require('fs');
 const path = require('path');
 const { pickNextMissing, clearPendingIfCreated } = require('./missingRefGuard.js');
 const {
-    goalImpliesNewArtifacts,
     goalWantsPreview,
     buildContinueAfterRecoveryNudge
 } = require('../context/artifactHints.js');
@@ -268,9 +267,12 @@ h1 { margin: 0 0 4px; color: #ffe600; letter-spacing: 2px; }
 `;
 }
 
+// The last-resort scaffold injects a known-good *Pac-Man* implementation, so it must
+// only fire for actual Pac-Man goals. It previously also matched any generic "game"
+// goal, which could overwrite a non-Pac-Man build (e.g. Snake/Tetris) with Pac-Man
+// code. The generic acceptance/verification path is unaffected and stays general.
 function isPacmanGoal(goal) {
-    return /\bpac-?man\b/i.test(String(goal || ''))
-        || (goalImpliesNewArtifacts(goal) && /\bgame\b/i.test(String(goal || '')));
+    return /\bpac[\s-]?man\b/i.test(String(goal || ''));
 }
 
 async function scaffoldPacmanFile(session, execDeps, emit, relPath, content, reason) {

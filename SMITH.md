@@ -112,7 +112,7 @@ Agent Smith accumulated features faster than it shed them. The v44 restructure *
 | `ghosttrace/` | separate trace pipeline | **Peripheral.** Useful for diagnostics; not core. Keep small or fold into a plugin. |
 | Smith persona / Matrix theme | persona prompts (`src/shared/smithPersona.js`) | **Cosmetic layer.** Fine for Chat Mode branding; must not pollute Build Mode prompts (especially Gemma). (Login fight / bg / audio easter eggs were removed as bloat.) |
 | Plugin system | manager + host + installer + hooks | **Justified IF used.** Extends execution without four-place edits. Bloat if no real plugins ship. |
-| Vector memory | Ollama embeddings + LM Studio chat | **Dual stack.** Acceptable if memory measurably helps builds; bloat if never retrieved in traces. |
+| Vector memory | LM Studio embeddings (`/v1/embeddings`); Ollama optional legacy fallback | **Single stack.** Load an embedding model in LM Studio. Acceptable if memory measurably helps builds; bloat if never retrieved in traces. |
 | Dual model router | separate Planner / Editor selectors | **Justified for quality.** Bloat if both slots always run the same model. |
 
 ### Retirement doctrine
