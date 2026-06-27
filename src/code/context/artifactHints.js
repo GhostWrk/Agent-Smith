@@ -63,23 +63,31 @@ function buildNewArtifactBlock(goal, projectRoot) {
         lines.push(`After the files exist, call show_preview with path \`${sub}/index.html\`.`);
     }
     lines.push(
-        `All three files must live as siblings inside \`${sub}/\` — link as href="style.css" and src="script.js" (not pacman/style.css from root index.html).`,
-        'Start with write_file now — do not read the root index.html unless you are patching an existing game file.'
+        `All three files must live as siblings inside \`${sub}/\` — link as href="style.css" and src="script.js" (a bare same-folder name, not a path from the root index.html, and not split across other folders like src/).`,
+        'Start with write_file now — do not read the root index.html unless you are patching an existing file in this artifact.'
     );
     return lines.join('\n');
+}
+
+/** True only when the goal is actually a game (so game-specific hints stay scoped). */
+function goalIsGame(goal) {
+    return /\b(game|pac-?man|snake|tetris|breakout|pong|arcade|maze|invaders|flappy|platformer|playable)\b/i.test(String(goal || ''));
 }
 
 /** Urgent system nudge after the completion gate blocks with zero writes. */
 function buildWriteNudge(goal, projectRoot) {
     const sub = suggestArtifactSubdir(goal);
     const preview = goalWantsPreview(goal) ? `\n4. show_preview path="${sub}/index.html"` : '';
+    const jsDesc = goalIsGame(goal)
+        ? 'the complete game: state, input, loop, win/lose'
+        : 'the complete app logic (state, event handlers, persistence, rendering)';
     return [
         '[HARNESS — WRITE REQUIRED]',
         'You stopped without creating files. Respond with tool calls ONLY (no prose).',
-        `Required sequence:`,
+        `Required sequence (all files as siblings in the SAME folder \`${sub}/\`):`,
         `1. write_file path="${sub}/index.html" — complete HTML linking style.css and script.js`,
         `2. write_file path="${sub}/style.css" — the complete stylesheet`,
-        `3. write_file path="${sub}/script.js" — the complete game: state, input, loop, win/lose${preview}`,
+        `3. write_file path="${sub}/script.js" — ${jsDesc}${preview}`,
         detectAppRepo(projectRoot)
             ? `Do NOT patch the root index.html — it belongs to the host app.`
             : `Create all three files before stopping again.`
@@ -91,19 +99,22 @@ function buildMissingRefsNudge(missingRefs, goal, projectRoot) {
     const refs = [...new Set((missingRefs || []).filter(Boolean))];
     if (!refs.length) return '';
     const next = pickNextMissing(refs) || refs[0];
-    const preview = goalWantsPreview(goal) ? `\nAfter all files exist: show_preview path="${suggestArtifactSubdir(goal)}/index.html".` : '';
-    const gameHint = /\b(game|pac-?man)\b/i.test(String(goal || ''))
+    const nextNorm = String(next).replace(/\\/g, '/');
+    const dir = path.posix.dirname(nextNorm);
+    const dirHint = dir && dir !== '.' ? `${dir}/` : '';
+    const preview = goalWantsPreview(goal) ? `\nAfter all files exist: show_preview path="${dirHint}index.html".` : '';
+    const gameHint = goalIsGame(goal)
         ? ' Include keyboard input, score updates, game loop, and win/lose logic.'
         : '';
     return [
         '[HARNESS — CREATE MISSING FILES]',
         'Respond with ONE tool call only — no prose, no HTML.',
-        `NEXT: write_file path="${next}" with the complete ${/\.css$/i.test(next) ? 'CSS' : 'JavaScript'}.${gameHint}`,
-        'Do NOT rewrite pacman/index.html or any .html file.',
-        refs.length > 1 ? `Still needed after that: ${refs.filter(r => r !== next).join(', ')}` : '',
-        detectAppRepo(projectRoot)
-            ? 'Use the full path above (e.g. pacman/script.js), not bare script.js at project root.'
-            : '',
+        `NEXT: write_file path="${nextNorm}" with the complete ${/\.css$/i.test(nextNorm) ? 'CSS' : 'JavaScript'}.${gameHint}`,
+        'Do NOT rewrite any .html file — only create the missing file above.',
+        // The common failure is putting the file in a different folder or under a bare
+        // name. The referenced files must be siblings of the HTML that links them.
+        `Write it at EXACTLY that path${dirHint ? ` (same folder \`${dirHint}\` as the HTML that links it)` : ''} — not a bare filename and not in another directory.`,
+        refs.length > 1 ? `Still needed after that (same folder): ${refs.filter(r => r !== next).join(', ')}` : '',
         preview
     ].filter(Boolean).join('\n');
 }
@@ -112,17 +123,18 @@ function buildMissingRefsNudge(missingRefs, goal, projectRoot) {
 function buildContinueAfterRecoveryNudge(goal, htmlRel, previewOpened) {
     const sub = suggestArtifactSubdir(goal);
     const html = htmlRel || `${sub}/index.html`;
+    const noun = goalIsGame(goal) ? 'game' : 'app';
     const lines = [
         '[CONTINUE — run still active]',
         'Recovery finished. Do not stop or replan from scratch.',
-        'Do NOT rewrite existing game files unless fixing a validation error.'
+        'Do NOT rewrite existing files unless fixing a validation error.'
     ];
     if (goalWantsPreview(goal) && !previewOpened) {
         lines.push(`NEXT (one tool call): show_preview kind=project_file target="${html}"`);
     } else if (goalWantsPreview(goal)) {
-        lines.push('Preview was opened. Reply briefly that the game is ready.');
+        lines.push(`Preview was opened. Reply briefly that the ${noun} is ready.`);
     } else {
-        lines.push('Reply briefly that the game is ready — no further writes needed.');
+        lines.push(`Reply briefly that the ${noun} is ready — no further writes needed.`);
     }
     return lines.join('\n');
 }

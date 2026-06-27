@@ -1,5 +1,15 @@
 # Agent Smith Changelog
 
+## [46.12.2] - 2026-06-27 — Code Mode: generic (de-gamed) file-recovery nudges
+
+Code Mode only — Chat and Agent Mode behavior is unchanged.
+
+### Fixed
+- **Recovery nudges were game/Pac-Man-framed.** When a web build left a linked file missing (e.g. `index.html` referencing a `script.js` that wasn't created), the harness told the model to build "the complete game: state, input, loop, win/lose" and referenced `pacman/` paths — misleading for non-game apps (Kanban boards, dashboards, etc.) and a cause of runs stalling to max turns. Nudges are now generic; game-specific hints apply only to actual game goals.
+- **Missing-file nudges enforce same-folder placement.** They now state the exact target path and that the file must be a sibling of the HTML that links it. The common failure was the model writing the file in a different directory or under a bare name, leaving a dangling reference.
+
+Verified by re-running a Kanban build that previously failed at max turns (files split across `site/` and `src/`, dangling references): it now completes in ~20 turns with `index.html`/`style.css`/`script.js` in one folder, no dangling references, and runs in a browser (3 columns, no JS errors).
+
 ## [46.12.1] - 2026-06-27 — Code Mode: reasoning-model advisory + reasoning auto-collapse
 
 Code Mode only — Chat and Agent Mode behavior is unchanged.
