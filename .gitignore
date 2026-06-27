@@ -3,9 +3,6 @@ node_modules/
 
 # Build output
 dist/
-release/
-release-build/
-release-out/
 *.AppImage
 *.deb
 
@@ -22,6 +19,3 @@ src/data/ghosttrace/
 .DS_Store
 Thumbs.db
 *.log
-
-# Repomix packs (generated for review; do not commit)
-repomix-output.*
