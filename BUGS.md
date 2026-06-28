@@ -467,7 +467,7 @@ Use this section to scan the codebase batch by batch. For each file, add finding
 
 **Bugs / notes:**
 
-- TBD
+- **MEDIUM — planning mode can execute write/shell tool calls before user approval.** The planning loop offers only read tools plus `submit_code_plan`, but it executes every non-`submit_code_plan` call returned in `msg.tool_calls` directly through `executeTool` with the full executor dependencies and no phase gate or explicit allowlist. If a model/server returns a native `write_file`, `patch`, `append_file`, or `run_command` call despite the advertised tool list, planning mode can mutate the project or run shell commands before a plan is submitted/approved. Fix: enforce a planning allowlist (`read_file`, `grep`, `glob`, `list_project`, optionally `show_preview`) before `executeTool`, or route planning calls through the same phase middleware. Related code: `src/code/loop/planningPhase.js:29-35`, `src/code/loop/planningPhase.js:84-98`.
 
 ### `src/code/loop/reasoningStrip.js`
 
@@ -479,7 +479,7 @@ Use this section to scan the codebase batch by batch. For each file, add finding
 
 **Bugs / notes:**
 
-- TBD
+- **MEDIUM — isolated Code runs leave the global project root switched to the worktree and skip normal cleanup.** Whole-run isolation creates a git worktree, rewrites `session.projectRoot`, and calls `projectContext.setRoot(wt.path)`, but the normal `executeTurnLoop` path never restores `projectContext` to `parentProjectRoot`. Its cleanup guard also requires `opts.projectRoot`, yet the final `executeTurnLoop({ ... })` call does not pass `projectRoot`, so `cleanupWorktree(...)` is skipped after non-subagent isolated runs. A completed isolated run can therefore leave subsequent app operations pointed at `.agentsmith/worktrees/<session>` instead of the original checkout, with temporary worktrees/branches accumulating. Fix: pass the parent project root into `executeTurnLoop`, restore `projectContext` in a `finally`, and define whether whole-run worktree changes should be synced or intentionally preserved before cleanup. Related code: `src/code/loop/runCodeTask.js:98-100`, `src/code/loop/runCodeTask.js:246-258`, `src/code/loop/runCodeTask.js:407-425`.
 
 ### `src/code/loop/runWatchdog.js`
 
@@ -509,7 +509,7 @@ Use this section to scan the codebase batch by batch. For each file, add finding
 
 **Bugs / notes:**
 
-- TBD
+- **LOW — malformed `write_file` without content can throw after recording ledger state.** The `write_file` branch validates `path` and calls `checkWriteChunkSize(a.content)`, but it never requires `content` to be a string before taking a change-ledger snapshot/recordCreate and passing `a.content` to `fs.writeFile`. If a model emits `write_file` with a path but missing `content`, `fs.writeFile(..., undefined, 'utf-8')` throws instead of returning a normal tool error, potentially after `recordCreate` has logged a create for a file that was never written. Fix: reject missing/non-string content before any ledger operation, e.g. `if (typeof a.content !== 'string') return { error: 'write_file requires string content' }`. Related code: `src/code/tools/executor.js:214-237`.
 
 ### `src/code/tools/extractor.js`
 
