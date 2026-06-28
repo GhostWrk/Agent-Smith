@@ -1,5 +1,11 @@
 # Agent Smith Changelog
 
+## [46.19.2] - 2026-06-28 — Revert default Context slider to 8192 (release-safe)
+
+### Changed
+- Reverted the Context Window slider's static default back to **8192** (v46.19.1 had bumped it to 16384). On a released app with diverse hardware, the static default must stay conservative: Chat/Agent send the slider value directly (no clamp), so a higher static default could over-request on low-VRAM machines in manual mode. It is also unnecessary — **auto-tune (on by default) overrides the slider right after the startup hardware scan**: it reads GPU telemetry, sizes num_ctx to the model + VRAM (e.g. ~13K at 8GB, ~26K at 16GB), sets the slider, and reloads LM Studio to match. And Code Mode independently uses the model's loaded window via the v46.19.0 clamp (never exceeding it). So 8192 is just the pre-scan placeholder, not what users actually run with.
+
+
 ## [46.19.1] - 2026-06-28 — Raise the default Context Window slider to 16384
 
 ### Changed
