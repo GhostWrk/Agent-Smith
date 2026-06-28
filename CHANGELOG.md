@@ -1,5 +1,13 @@
 # Agent Smith Changelog
 
+## [46.16.0] - 2026-06-27 — Code Mode: proactive mid-build runtime verification
+
+Code Mode only — Chat and Agent Mode behavior is unchanged.
+
+### Added
+- **Load the app in a real browser DURING the build and feed errors back so the model fixes them in-flight.** The completion gate's runtime check only fired when the model declared "done" — which local models often never do (they grind to a turn/no-write limit). Now, once the web project is structurally complete (index.html + every referenced script on disk), the turn loop loads it in a real browser after a file-changing turn; if it throws, the exact errors are injected as a fix-it nudge so the model corrects mismatched import/export names, undefined references, wrong element ids, etc., and keeps going. Throttled by a content signature (only re-checks when files change) and capped (`XK_CODE_MAX_RUNTIME_CHECKS`, default 6) to avoid loops; disabled by `XK_CODE_NO_RUNTIME_VERIFY=1`. Tests: `proactiveRuntime.test.js`.
+
+
 ## [46.15.1] - 2026-06-27 — Code Mode: runtime check on the final verdict
 
 Code Mode only.

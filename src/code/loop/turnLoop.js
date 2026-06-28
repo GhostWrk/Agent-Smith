@@ -13,6 +13,7 @@ const { compactForPhaseTransition } = require('../context/phaseCompact.js');
 const gemmaHarness = require('../context/gemmaHarness.js');
 const { checkCompletion, runValidation, formatGateMessage, formatBeforeDoneMessage, maxReflectionsForSession, runMilestoneVerify, goalImpliesBuildWork } = require('../governor/completionGate.js');
 const { buildWriteNudge, buildMissingRefsNudge } = require('../context/artifactHints.js');
+const { maybeProactiveRuntimeCheck } = require('../governor/proactiveRuntime.js');
 const { buildFinalSummary } = require('./finalSummary.js');
 const { phaseHint, WRITE_TOOLS } = require('./phases.js');
 const { createDefaultMiddleware, runMiddlewareChain, applyPhaseAdvance } = require('./middleware.js');
@@ -671,6 +672,11 @@ async function runTurnLoop(ctx) {
                 session.messages.push({ role: 'system', content: nudge });
                 session.phase = 'implement';
             }
+        } else {
+            // Once the web project is structurally complete, load it in a real browser mid-build
+            // and feed any runtime errors back so the model fixes them in-flight — without waiting
+            // for it to declare "done" (which local models often never do). Throttled + capped.
+            await maybeProactiveRuntimeCheck(session, execDeps, emit);
         }
 
         await runMiddlewareChain(middleware, 'afterTurn', {
