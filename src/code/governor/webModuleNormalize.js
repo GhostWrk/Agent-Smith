@@ -95,16 +95,40 @@ function downgradeModuleTags(html) {
     );
 }
 
+/** Add type="module" to local <script src> tags that lack a type (upgrade to module). */
+function upgradeModuleTags(html) {
+    return String(html).replace(
+        /<script\b([^>]*\bsrc\s*=\s*["'][^"']+["'][^>]*)>/gi,
+        (m, attrs) => (/\btype\s*=/.test(attrs) || /\bsrc\s*=\s*["']https?:/i.test(attrs))
+            ? m : '<script type="module"' + attrs + '>'
+    );
+}
+
+/** Append `window.NAME = NAME;` for each top-level decl referenced as window.NAME but unset. */
+function exposeWindowGlobals(code, windowRefs) {
+    const decls = topLevelDecls(code);
+    const already = collectAssignedWindow(code);
+    const expose = [...decls].filter(n => windowRefs.has(n) && !already.has(n));
+    if (!expose.length) return { code, changed: false };
+    const out = code.replace(/\s*$/, '\n')
+        + expose.map(n => `window.${n} = ${n};`).join('\n') + '\n';
+    return { code: out, changed: true };
+}
+
 /**
- * Make a multi-file vanilla web app reliably runnable, regardless of how the model wired it.
- * Handles the two failure classes seen on local/coder models:
- *   1. classic <script> + ES-module syntax (import/export) -> strip the syntax.
- *   2. type="module" + code that relies on `window.X` globals (e.g. `const App = {}` used as
- *      `window.App`) -> module scope means window.App is never set, so the app dies on load.
- *      Downgrade the tags to classic AND expose referenced top-level decls as window globals.
+ * Make a multi-file vanilla web app reliably runnable, regardless of how the model wired it,
+ * by forcing ONE consistent strategy across the whole project (the gate may run several times
+ * as the model edits, so this must converge, not flip-flop):
  *
- * REAL ES-module apps (files that import each other) are left untouched — they work over HTTP.
- * Returns the list of repaired files (relative paths). Pure I/O; safe to call repeatedly.
+ *   - MODULE-INTENT app (any file uses import/export): ensure every local <script> is
+ *     type="module" (a prior pass may have downgraded a tag while files still use import/export,
+ *     which throws "Unexpected token 'export'"). Also expose any window.* globals the code relies
+ *     on (valid inside a module). ES modules work over HTTP (Agent Smith's preview serves HTTP).
+ *   - GLOBALS-BASED app (no import/export anywhere): downgrade tags to classic, strip any stray
+ *     module syntax, and expose window.* globals (e.g. `const App = {}` used as `window.App`,
+ *     which module scope would otherwise leave undefined -> "Cannot read properties of undefined").
+ *
+ * Returns the list of repaired files (relative paths). Pure I/O; idempotent.
  */
 function normalizeWebProject(projectRoot, htmlRel) {
     const fixed = [];
@@ -123,31 +147,21 @@ function normalizeWebProject(projectRoot, htmlRel) {
         if (!jsAbs.length) return fixed;
 
         const sources = jsAbs.map(a => fs.readFileSync(a, 'utf8'));
-
-        // Real ES-module app? (a local file imports another) -> leave it alone.
-        const hasRelImport = sources.some(s =>
-            /^[ \t]*import\b[^\n]*from\s*['"]\.{0,2}\/[^'"]+['"]/m.test(s));
-        if (hasRelImport) return fixed;
-
-        // Globals-based app: which window.X names does it reference (html inline + all js)?
         const windowRefs = collectWindowRefs([html, ...sources]);
+        // Module-intent = real module wiring (a file imports another). A lone `export` with no
+        // imports is treated as globals-based (strip -> classic) so it also works over file://.
+        const moduleIntent = sources.some(s =>
+            /^[ \t]*import\b[^\n]*from\s*['"]\.{0,2}\/[^'"]+['"]/m.test(s));
 
-        // 1. Downgrade any type="module" script tags to classic.
-        const newHtml = downgradeModuleTags(html);
+        const newHtml = moduleIntent ? upgradeModuleTags(html) : downgradeModuleTags(html);
         const htmlChanged = newHtml !== html;
         if (htmlChanged) html = newHtml;
 
-        // 2. Per file: strip stray module syntax, then expose referenced top-level decls on window.
         for (let i = 0; i < jsAbs.length; i++) {
             const orig = sources[i];
-            let { code } = stripEsModuleSyntax(orig);
-            const decls = topLevelDecls(code);
-            const already = collectAssignedWindow(code);
-            const expose = [...decls].filter(n => windowRefs.has(n) && !already.has(n));
-            if (expose.length) {
-                code = code.replace(/\s*$/, '\n')
-                    + expose.map(n => `window.${n} = ${n};`).join('\n') + '\n';
-            }
+            // Globals-based: strip stray module syntax first. Module-intent: keep import/export.
+            let code = moduleIntent ? orig : stripEsModuleSyntax(orig).code;
+            code = exposeWindowGlobals(code, windowRefs).code;
             if (code !== orig) {
                 fs.writeFileSync(jsAbs[i], code, 'utf8');
                 fixed.push(path.relative(projectRoot, jsAbs[i]).split(path.sep).join('/'));
@@ -169,5 +183,6 @@ function collectAssignedWindow(code) {
 
 module.exports = {
     stripEsModuleSyntax, htmlIsClassic, normalizeClassicScriptModules,
-    normalizeWebProject, collectWindowRefs, topLevelDecls, downgradeModuleTags
+    normalizeWebProject, collectWindowRefs, topLevelDecls,
+    downgradeModuleTags, upgradeModuleTags, exposeWindowGlobals
 };

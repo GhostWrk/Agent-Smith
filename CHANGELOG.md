@@ -1,5 +1,13 @@
 # Agent Smith Changelog
 
+## [46.14.1] - 2026-06-27 — Code Mode: converge multi-file wiring consistently
+
+Code Mode only — Chat and Agent Mode behavior is unchanged.
+
+### Fixed
+- **Make the multi-file web repair converge instead of flip-flopping across gate passes.** The gate runs repeatedly as the model edits, so the repair must drive the whole project to ONE consistent strategy. 46.14.0 "left real module apps untouched", but a prior pass could have already downgraded the tags to classic while the files still used `import`/`export` — leaving `<script>` + `export` → "Unexpected token 'export'" (the exact state an end-to-end build landed in). Now: if any file uses real import-wiring, every local `<script>` is forced back to `type="module"`; otherwise tags are forced to classic and module syntax is stripped — and in both cases referenced `window.*` globals are exposed. Verified in a real browser for both classes (3 columns, 1 button, zero errors). Tests: `webNormalizeProject.test.js` (now 6).
+
+
 ## [46.14.0] - 2026-06-27 — Code Mode: deterministically repair multi-file web wiring
 
 Code Mode only — Chat and Agent Mode behavior is unchanged.

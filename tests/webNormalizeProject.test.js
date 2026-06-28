@@ -62,6 +62,24 @@ test('leaves a REAL ES-module app (files import each other) untouched', () => {
     assert.equal(fs.readFileSync(path.join(root, 'app.js'), 'utf8'), before);
 });
 
+// The E2E build failure: a prior gate pass downgraded the tags to classic, but the files
+// still use import/export wiring -> "Unexpected token 'export'". Must re-upgrade to module.
+test('re-upgrades to type=module when files use import-wiring but tags were classic', () => {
+    const root = mkproj({
+        'index.html': '<!doctype html><html><body><div id="x"></div>' +
+            '<script src="src/state.js"></script><script src="src/app.js"></script></body></html>',
+        'src/state.js': 'export const State = { v: 7 };\n',
+        'src/app.js': "import { State } from './state.js';\ndocument.getElementById('x').textContent = State.v;\n"
+    });
+    normalizeWebProject(root, 'index.html');
+    const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+    assert.equal((html.match(/type="module"/g) || []).length, 2, 'both tags re-upgraded to module');
+    assert.match(fs.readFileSync(path.join(root, 'src/app.js'), 'utf8'), /\bimport\b/, 'import wiring kept');
+    // idempotent: a second pass leaves it consistent
+    const second = normalizeWebProject(root, 'index.html');
+    assert.deepEqual(second, []);
+});
+
 test('still fixes classic <script> + export, and is idempotent', () => {
     const root = mkproj({
         'index.html': '<!doctype html><html><body><script src="a.js"></script>' +
