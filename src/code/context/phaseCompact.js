@@ -12,19 +12,24 @@ function isToolPairStart(msg, idx, messages) {
     return next && next.role === 'tool';
 }
 
-function collectRecentToolPairs(messages, keepPairs) {
+function collectRecentToolPairs(messages, keepPairs = DEFAULT_KEEP_TOOL_PAIRS) {
+    const limit = Math.max(0, Math.floor(Number(keepPairs) || 0));
+    if (limit === 0) return [];
     const pairs = [];
-    for (let i = messages.length - 1; i >= 0 && pairs.length < keepPairs; i--) {
-        const m = messages[i];
-        if (m.role !== 'tool') continue;
-        const assistantIdx = i - 1;
-        if (assistantIdx < 0 || messages[assistantIdx].role !== 'assistant') continue;
-        const assistant = messages[assistantIdx];
-        if (!assistant.tool_calls?.length) continue;
-        pairs.unshift({ assistant, tools: [m] });
-        i = assistantIdx;
+    const list = Array.isArray(messages) ? messages : [];
+    for (let i = 0; i < list.length; i++) {
+        const assistant = list[i];
+        if (assistant.role !== 'assistant' || !assistant.tool_calls?.length) continue;
+        const tools = [];
+        let j = i + 1;
+        while (j < list.length && list[j].role === 'tool') {
+            tools.push(list[j]);
+            j++;
+        }
+        if (tools.length) pairs.push({ assistant, tools });
+        i = j - 1;
     }
-    return pairs;
+    return pairs.slice(-limit);
 }
 
 function flattenPairs(pairs) {

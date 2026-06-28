@@ -21,6 +21,14 @@ test('PlanArtifacts creates PLAN and IMPLEMENT for non-trivial tasks', async () 
     assert.ok(pa.milestones.length >= 2);
 });
 
+test('PlanArtifacts parses the default Final verification milestone', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'plan-final-'));
+    const pa = await PlanArtifacts.ensure(root, 'build a browser dashboard');
+    const ids = pa.milestones.map(m => m.id);
+    assert.deepEqual(ids, ['M1', 'M2', 'Final']);
+    assert.equal(pa.milestones.find(m => m.id === 'Final').verify, 'harness completion gate');
+});
+
 test('PlanAnchor.addNote appends IMPLEMENT entry', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'plan-note-'));
     const pa = await PlanArtifacts.ensure(root, 'fix the login page', { forcePlan: true });

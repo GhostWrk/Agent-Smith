@@ -12,8 +12,8 @@ const ARTIFACT_DIR = '.agentsmith';
 const PLAN_FILE = 'PLAN.md';
 const IMPLEMENT_FILE = 'IMPLEMENT.md';
 
-const MILESTONE_RE = /^-\s*\[([ xX])\]\s*\*\*(M\d+|Final)[^*]*\*\*[^|]*\|\s*verify:\s*`([^`]+)`/gm;
-const MILESTONE_E2E_RE = /^-\s*\[([ xX])\]\s*\*\*(M\d+|Final)[^*]*\*\*[^|]*\|\s*e2e:\s*`([^`]+)`/gm;
+const MILESTONE_RE = /^-\s*\[([ xX])\]\s*\*\*(M\d+|Final)[^*]*\*\*.*?(?:\||—)\s*verify:\s*`([^`]+)`/gm;
+const MILESTONE_E2E_RE = /^-\s*\[([ xX])\]\s*\*\*(M\d+|Final)[^*]*\*\*.*?(?:\||—)\s*e2e:\s*`([^`]+)`/gm;
 const MILESTONE_SIMPLE = /^-\s*\[([ xX])\]\s*\*\*(M\d+|Final)/gm;
 
 function artifactDir(projectRoot) {
@@ -60,7 +60,7 @@ Mark each milestone \`[x]\` when complete. Do not mark complete until the verifi
 
 - [ ] **M1: Explore** — understand project layout and constraints | verify: \`list_project once\`
 - [ ] **M2: Implement** — create or fix required files | verify: \`syntax + references resolve\`
-- [ ] **Final: all checks pass** — verify: \`harness completion gate\`
+- [ ] **Final: all checks pass** | verify: \`harness completion gate\`
 
 ## Scope boundaries
 
