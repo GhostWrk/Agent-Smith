@@ -1,5 +1,11 @@
 # Agent Smith Changelog
 
+## [46.19.1] - 2026-06-28 — Raise the default Context Window slider to 16384
+
+### Changed
+- The **Context Window** slider now defaults to **16384** (was 8192). This shared default applies to all modes; it gives Chat/Agent more room out of the box and matches the Code Mode floor. Code Mode already auto-uses the model's full loaded window via the v46.19.0 clamp (never exceeding what the model is loaded with), so Code Mode is unaffected by the slider value; this change primarily raises the Chat/Agent starting point. Users can still slide anywhere from 2048–131072. (Note: Chat/Agent send the slider value directly, so if a model is loaded with a smaller window the user should lower the slider to match — Code Mode handles this automatically.)
+
+
 ## [46.19.0] - 2026-06-28 — Code Mode: use the model's full context window
 
 Code Mode only — Chat and Agent Mode still use the context slider directly.

@@ -594,7 +594,7 @@ if (window.XKCodeMode) {
         markedParse: window.markedParse,
         updateEmptyState,
         getModel: () => modelSelect?.value,
-        getNumCtx: () => parseInt(ctxSlider?.value || '8192', 10),
+        getNumCtx: () => parseInt(ctxSlider?.value || '16384', 10),
         getMaxTurns: () => window.XKRuntimeProfileUI?.getMaxTurns?.() ?? 40,
         getCodeTemperature: () => window.XKRuntimeProfileUI?.getCodeTemperature?.() ?? 0.2,
         getRequirePlanApproval,
@@ -2389,7 +2389,7 @@ My Query: ${text}`;
                     model,
                     messages: messagesForOllama,
                     stream: true,
-                    options: { temperature: parseFloat(tempSlider.value), num_ctx: parseInt(ctxSlider?.value || 8192) },
+                    options: { temperature: parseFloat(tempSlider.value), num_ctx: parseInt(ctxSlider?.value || 16384) },
                     keep_alive: -1
                 };
                 if (activeTools.length > 0) body.tools = activeTools;
