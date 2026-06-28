@@ -1104,7 +1104,7 @@ Use this section to scan the codebase batch by batch. For each file, add finding
 
 **Bugs / notes:**
 
-- TBD
+- **LOW — harness executes model-created filenames through a shell string.** The `runFile` helper builds `execSync(`${runner} "${absPath}" ${args}`, ...)` and `fileFor()` chooses a file by basename from the model-controlled workspace. A generated filename containing a double quote or shell metacharacters can break the quoted path and cause the post-task checker to run unintended shell syntax, outside the app's normal `commandPolicy` path. Fix: use `execFileSync(runner, [absPath, ...argsArray], { cwd: WS, ... })` and keep task arguments as argv arrays. Related code: `scripts/code-mode-100-e2e.js:102-114`.
 
 ### `scripts/code-smoke.js`
 
@@ -1140,7 +1140,7 @@ Use this section to scan the codebase batch by batch. For each file, add finding
 
 **Bugs / notes:**
 
-- TBD
+- **LOW — password-assisted share links cannot log in because auth args use the wrong shape.** The helper posts `{ channel:'auth-login', args:[username, password] }` to `/api/invoke`, but the auth IPC handler expects a single object argument `{ username, password }`. The web proxy spreads the array into the handler, so `auth-login` destructures the username string and receives `username/password` as `undefined`; any run with `AGENT_SMITH_SHARE_PASSWORD` fails instead of appending a token. Fix: send `args: [{ username, password }]` (and consider avoiding query-string tokens altogether; the renderer download-token leak is already recorded). Related code: `scripts/print-download-link.js:68-75`, `main.js:872-915`, `src/main/ipc/auth.js:11-17`.
 
 ### `scripts/readiness-report.js`
 
