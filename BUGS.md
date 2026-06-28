@@ -1044,7 +1044,7 @@ Use this section to scan the codebase batch by batch. For each file, add finding
 
 **Bugs / notes:**
 
-- TBD
+- **LOW — action-log state is not isolated to the throwaway harness directory.** The script calls `createActionLog(userDataPath)`, but `createActionLog` expects an object with `userDataPath`; a string argument makes `deps.userDataPath` undefined, so the log file falls back to `./action-log.json` in the process working directory. The 100-task battery can therefore create or reuse a real repo/cwd action log, leave it behind after cleanup, and let stale actions affect the review/undo tasks. Fix: call `createActionLog({ userDataPath })` and delete any accidental cwd log in a one-time migration/cleanup if needed. Related code: `scripts/agent-assistant-100-e2e.js:57-70`, `src/main/services/actionLog.js:20-30`, `scripts/agent-assistant-100-e2e.js:803-808`.
 
 ### `scripts/agent-assistant-parity-e2e.js`
 
