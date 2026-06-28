@@ -391,7 +391,7 @@ Use this section to scan the codebase batch by batch. For each file, add finding
 
 **Bugs / notes:**
 
-- TBD
+- **MEDIUM — project-local rule loading executes arbitrary `.agentsmith/rules/*.js` during Code Mode validation.** `loadRules` walks `.agentsmith/rules` and calls `require(abs)` for every `.js` rule file with no signing, prompt, sandbox, or repository trust check. Because Code Mode auto-runs validation, opening/running an untrusted project can execute project-provided JavaScript in the main process. This may be intended for trusted project rules, but it is a high-trust execution path and should be documented/gated like plugins. Fix: disable rules by default for untrusted workspaces, run them in the existing plugin sandbox/child process, or require explicit user consent before first load. Related code: `src/code/governor/projectRules.js:15-49`.
 
 ### `src/code/governor/qualityMonitor.js`
 
@@ -409,13 +409,14 @@ Use this section to scan the codebase batch by batch. For each file, add finding
 
 **Bugs / notes:**
 
-- TBD
+- **MEDIUM — smoke test follows local script references outside the project root.** `readLocalScripts` resolves every non-HTTP `<script src>` with `path.resolve(htmlDir, rel)` and reads it without verifying that the resolved path stays under `projectRoot`. A generated HTML file with `../` references can make the smoke test read and execute JavaScript outside the workspace in the VM/jsdom smoke environment, violating Code Mode's project-root containment expectation. Fix: reject external-to-root resolved script paths before reading/executing them. Related code: `src/code/governor/smokeTest.js:25-43`, `src/code/governor/smokeTest.js:181-187`, `src/code/governor/smokeTest.js:211-224`.
+- **LOW — smoke-test DOM stub masks real missing-element errors.** The VM fallback returns a stub element for any `getElementById` / `querySelector` call, even when the element does not exist in the HTML. This avoids false positives, but it can also hide real bugs where app code expects missing DOM nodes and would throw in a browser. Fix: optionally run a stricter mode after the permissive smoke pass, or only auto-create stubs for known benign selectors. Related code: `src/code/governor/smokeTest.js:88-92`, `src/code/governor/smokeTest.js:128-138`.
 
 ### `src/code/governor/webValidators.js`
 
 **Bugs / notes:**
 
-- TBD
+- **LOW — serialization-artifact detector flags legitimate escaped braces in JavaScript strings/regex.** `detectSerializationArtifacts` treats any `\\{` or `\\}` in a text file as corruption. That pattern can be valid JavaScript, especially regex literals or string patterns that intentionally escape literal braces. Because completion validation runs this detector over JS/CSS/HTML, valid code can be blocked as a leaked JSON artifact. Fix: make this check language-aware, avoid applying it to JS regex/string contents, or require stronger surrounding evidence of a tool-call envelope before failing. Related code: `src/code/governor/webValidators.js:455-467`.
 
 ## Batch 4 — Code Mode: loop / tools
 
@@ -447,7 +448,8 @@ Use this section to scan the codebase batch by batch. For each file, add finding
 
 **Bugs / notes:**
 
-- TBD
+- **MEDIUM — concurrent milestone worktrees share mutable orchestrator objects.** In `worktree-concurrent` mode, `Promise.all` runs multiple `runOneMilestone` calls with the same `planAnchor`, `planArtifacts`, `earlyStop`, `qualityMonitor`, `trace`, `execDeps`, and `projectContext`. Each child turn loop can append plan artifacts, update shared counters/trace, and temporarily call `projectContext.setRoot(worktreePath)`. Concurrent root switching and shared state mutation can race, causing tools to run against the wrong worktree or corrupt parent run state. Fix: clone/isolate per-child state and avoid global `projectContext.setRoot` during concurrent runs, or disable true concurrency until dependencies are made per-worktree. Related code: `src/code/loop/milestoneSubagents.js:71-120`, `src/code/loop/milestoneSubagents.js:165-167`.
+- **LOW — worktree cleanup is skipped when a child turn loop throws.** `cleanupMilestoneWorktree` runs only after `executeTurnLoop` completes successfully and after syncing files. If `executeTurnLoop` throws, the `finally` restores `projectContext` but does not cleanup the created worktree, leaving temporary branches/worktrees behind. Fix: move cleanup into a `finally` guarded by `useWorktree && worktreePath`, preserving sync behavior where possible. Related code: `src/code/loop/milestoneSubagents.js:95-130`.
 
 ### `src/code/loop/missingRefGuard.js`
 
