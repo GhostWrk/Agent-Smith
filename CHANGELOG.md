@@ -1,5 +1,11 @@
 # Agent Smith Changelog
 
+## [46.19.3] - 2026-06-28 — Regression test: auto-tune fires on startup
+
+### Tests
+- Added `tests/autoTuneStartup.test.js` — drives the real `runtimeProfileUI` + `runtimeProfile` modules through `applyForCurrentModel()` (exactly what `fetchModels()` calls on boot) and asserts auto-tune actually fires: it scans hardware (`get-gpu-telemetry`), sizes num_ctx to the model + VRAM, overrides the 8192 slider placeholder, and triggers an LM Studio context reload. Also covers the negative cases — auto-tune OFF and a manual slider override both correctly skip auto-config and leave the conservative default. Verifies the v46.19.x context behavior end to end.
+
+
 ## [46.19.2] - 2026-06-28 — Revert default Context slider to 8192 (release-safe)
 
 ### Changed
