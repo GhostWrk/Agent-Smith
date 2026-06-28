@@ -270,10 +270,10 @@ Use this section to scan the codebase batch by batch. For each file, add finding
 
 **Bugs / notes:**
 
-- **LOW — duplicate renderer console logging.** `mainWindow.webContents.on("console-message", ...)` is registered twice in a row, so every renderer console message is logged twice. Impact is noisy logs / harder debugging, not a security issue. Fix: remove one duplicate listener. Related code: `main.js:394-395`.
-- **MEDIUM — unbounded `/api/invoke` request body accumulation.** The mobile/web IPC proxy concatenates request chunks into `body` with no maximum size before `JSON.parse`. A LAN/web client, and potentially a Cloudflare tunnel client, can send a huge POST body and force memory growth. Fix: enforce a small max body size and return `413 Payload Too Large` / destroy the request once exceeded. Related code: `main.js:872-879`.
-- **MEDIUM — unauthenticated static source disclosure for any `.js` / `.css` / image path.** The auth gate treats any URL ending in `.js`, `.css`, `.png`, or `.jpg` as public, then static serving allows any contained path under the app directory. This likely lets unauthenticated LAN/web clients fetch backend source such as `src/main/ipc/auth.js`, `src/main/services/auth.js`, or `src/shared/commandPolicy.js` before login. Fix: restrict unauthenticated static files to an explicit login/renderer asset allowlist, not every source file extension. Related code: `main.js:787-803`, `main.js:962-986`.
-- **MEDIUM — auto-download and execute moving `cloudflared` binary without integrity verification.** Startup downloads `cloudflared` from GitHub `latest` release URLs and later spawns the downloaded binary, with no pinned version or checksum/signature verification. The URL is hardcoded, so this is not command injection, but it is a supply-chain/trust risk. Fix: pin a version and verify SHA256/signature, or require explicit user consent before first download/run. Related code: `main.js:1006-1033`.
+- **FIXED in `fix-batch-1` (`f3acbd3`) — LOW — duplicate renderer console logging.** `mainWindow.webContents.on("console-message", ...)` was registered twice in a row, so every renderer console message was logged twice. Fixed by removing one duplicate listener. Related code: `main.js:394-395`.
+- **FIXED in `fix-batch-1` (`f3acbd3`) — MEDIUM — unbounded `/api/invoke` request body accumulation.** The mobile/web IPC proxy concatenated request chunks into `body` with no maximum size before `JSON.parse`. Fixed by enforcing a 1 MB request body cap and returning `413 Payload Too Large` once exceeded. Related code: `main.js:872-879`.
+- **FIXED in `fix-batch-1` (`f3acbd3`) — MEDIUM — unauthenticated static source disclosure for any `.js` / `.css` / image path.** The auth gate treated any URL ending in `.js`, `.css`, `.png`, or `.jpg` as public, then static serving allowed any contained path under the app directory. Fixed by replacing extension wildcarding with an explicit public asset allowlist. Related code: `main.js:787-803`, `main.js:962-986`.
+- **FIXED in `fix-batch-1` (`f3acbd3`) — MEDIUM — auto-download and execute moving `cloudflared` binary without integrity verification.** Startup downloaded `cloudflared` from GitHub `latest` release URLs and later spawned the downloaded binary by default. Fixed by making tunnel startup and first download explicitly opt-in via environment flags. Related code: `main.js:1006-1033`.
 
 ### `preload.js`
 
@@ -285,7 +285,7 @@ Use this section to scan the codebase batch by batch. For each file, add finding
 
 **Bugs / notes:**
 
-- **LOW — obsolete/missing legacy-path migration helper appears to fail by default.** The script reads `hotfix2/v41.7/tools.js` and `hotfix2/v41.7/index.js` unconditionally; if those legacy files are not present, it throws before doing anything. This may be an old one-off helper rather than active app code. Fix: remove it if obsolete, or add existence checks and clear usage errors. Related code: `replace-tools.js:3-9`.
+- **FIXED in `fix-batch-1` (`f3acbd3`) — LOW — obsolete/missing legacy-path migration helper appears to fail by default.** The script read `hotfix2/v41.7/tools.js` and `hotfix2/v41.7/index.js` unconditionally; if those legacy files were not present, it threw before doing anything. Fixed by accepting explicit legacy paths and reporting a clear usage error when required files are missing. Related code: `replace-tools.js:3-16`.
 
 ### `run.sh`
 
