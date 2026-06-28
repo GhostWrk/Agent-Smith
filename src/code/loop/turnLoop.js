@@ -223,7 +223,11 @@ async function runTurnLoop(ctx) {
                     planArtifacts: planArtifacts || session.planArtifacts,
                     grindMode: session.grindMode !== false,
                     projectMeta: session.projectMeta,
-                    agentRanOkAfterEdit: session.agentRanOkAfterEdit
+                    agentRanOkAfterEdit: session.agentRanOkAfterEdit,
+                    // Honest final verdict: even when the run ends without a completion
+                    // reflection (e.g. early-stop), still load the built web app in a real
+                    // browser so the status reflects whether it actually runs.
+                    runtimeVerify: execDeps && execDeps.runtimeVerify
                 }
             );
         }

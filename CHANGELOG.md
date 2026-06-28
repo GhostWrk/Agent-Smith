@@ -1,5 +1,13 @@
 # Agent Smith Changelog
 
+## [46.15.1] - 2026-06-27 — Code Mode: runtime check on the final verdict
+
+Code Mode only.
+
+### Fixed
+- **Run the real-browser runtime check on the final verdict too.** 46.15.0 wired runtime verification into the completion-reflection gate, but a run that ends without a completion reflection (e.g. early-stop) computed its final status via `finalize()` -> `runValidation` without the verifier — so the end status didn't reflect whether the app actually runs. `finalize()` now passes `execDeps.runtimeVerify`, so the final status is honest about runtime errors even when the model never declared "done".
+
+
 ## [46.15.0] - 2026-06-27 — Code Mode: real-browser runtime verification
 
 Code Mode only — Chat and Agent Mode behavior is unchanged.
