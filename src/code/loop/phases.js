@@ -16,6 +16,11 @@ const PHASE_TOOLS = {
 
 const WRITE_TOOLS = new Set(['write_file', 'append_file', 'patch']);
 
+// Tools offered on the FIRST write turn of an empty workspace: there is nothing to read,
+// grep, list, or preview, so offering those just invites weak models to waste turns
+// exploring an empty folder before creating any files. Restrict to writes (+ step-done).
+const WRITE_FIRST_TOOLS = new Set(['write_file', 'append_file', 'patch', 'mark_code_step_done']);
+
 function initialPhase() {
     return 'explore';
 }
@@ -105,6 +110,7 @@ function resolveInitialPhase({ projectRoot, treeSummary, goal }) {
 module.exports = {
     PHASE_TOOLS,
     WRITE_TOOLS,
+    WRITE_FIRST_TOOLS,
     initialPhase,
     resolveInitialPhase,
     isGreenfieldWorkspace,

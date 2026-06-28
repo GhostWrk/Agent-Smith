@@ -14,8 +14,9 @@ const { syntaxCheckFile, runCmd, runVerification, detectProjectCommands } = requ
 const wv = require('./webValidators.js');
 const { runAcceptance } = require('./acceptance.js');
 const { runSmokeTest } = require('./smokeTest.js');
+const { runFunctionalSmoke } = require('./functionalSmoke.js');
 const { runProjectRulesForProject } = require('./projectRules.js');
-const { buildNewArtifactBlock, suggestArtifactSubdir, goalWantsPreview, goalImpliesNewArtifacts, detectAppRepo, goalIsGame } = require('../context/artifactHints.js');
+const { buildNewArtifactBlock, goalWantsPreview, goalImpliesNewArtifacts, detectAppRepo, goalIsGame } = require('../context/artifactHints.js');
 const { normalizeWebProject } = require('./webModuleNormalize.js');
 const { pickNextMissing } = require('../loop/missingRefGuard.js');
 
@@ -149,16 +150,43 @@ async function runPlanTestVerify(projectRoot, planArtifacts) {
 
 /** Find an index.html already on disk (root, then an immediate subdir). Lets a reused
  *  workspace's web entry still be validated even when it wasn't written this run. */
+const SCAN_IGNORE = new Set(['node_modules', 'dist', 'build', '.git', '.agentsmith', 'release', 'coverage', '.cache']);
+
 function findProjectIndexHtml(projectRoot) {
-    const IGNORE = new Set(['node_modules', 'dist', 'build', '.git', '.agentsmith', 'release', 'coverage', '.cache']);
     try {
         if (fs.existsSync(path.join(projectRoot, 'index.html'))) return 'index.html';
         for (const e of fs.readdirSync(projectRoot, { withFileTypes: true })) {
-            if (!e.isDirectory() || e.name.startsWith('.') || IGNORE.has(e.name)) continue;
+            if (!e.isDirectory() || e.name.startsWith('.') || SCAN_IGNORE.has(e.name)) continue;
             if (fs.existsSync(path.join(projectRoot, e.name, 'index.html'))) return `${e.name}/index.html`;
         }
     } catch (e) { /* ignore */ }
     return null;
+}
+
+// Files the user prompt explicitly names as deliverables (README.md, index.html, …).
+const ARTIFACT_EXT = 'md|markdown|html?|css|js|mjs|cjs|json|txt|ya?ml|tsx?|jsx|svg|xml';
+function extractRequiredArtifacts(goal) {
+    const found = new Set();
+    const re = new RegExp(`(^|[^/\\w.])([A-Za-z0-9_-]+\\.(?:${ARTIFACT_EXT}))\\b`, 'gi');
+    for (const m of String(goal || '').matchAll(re)) found.add(m[2]);
+    return [...found];
+}
+
+/** True if a file with this basename exists (touched, at root, or in an immediate subdir). */
+function artifactExists(projectRoot, name, files) {
+    const base = name.toLowerCase();
+    if ((files || []).some(f => {
+        const l = String(f).toLowerCase().replace(/\\/g, '/');
+        return l === base || l.endsWith('/' + base);
+    })) return true;
+    try {
+        if (fs.existsSync(path.join(projectRoot, name))) return true;
+        for (const e of fs.readdirSync(projectRoot, { withFileTypes: true })) {
+            if (e.isDirectory() && !e.name.startsWith('.') && !SCAN_IGNORE.has(e.name)
+                && fs.existsSync(path.join(projectRoot, e.name, name))) return true;
+        }
+    } catch (e) { /* ignore */ }
+    return false;
 }
 
 async function runValidation(projectRoot, filesTouched, goal, opts = {}) {
@@ -179,6 +207,17 @@ async function runValidation(projectRoot, filesTouched, goal, opts = {}) {
         if (!syn.skipped) { ranChecks++; if (!syn.ok) messages.push(`[SYNTAX] ${syn.file || rel}: ${syn.message}`); }
     }
 
+    // --- required artifacts: files the prompt explicitly names must exist on disk ---
+    const requiredArtifacts = extractRequiredArtifacts(goal);
+    if (requiredArtifacts.length) {
+        ranChecks++;
+        for (const name of requiredArtifacts) {
+            if (!artifactExists(projectRoot, name, files)) {
+                messages.push(`[ARTIFACT] ${name} is required by the prompt but missing`);
+            }
+        }
+    }
+
     // --- web layer ---
     let htmlRel = files.map(f => f.replace(/\\/g, '/'))
         .find(f => f.toLowerCase().endsWith('index.html')) ||
@@ -195,6 +234,7 @@ async function runValidation(projectRoot, filesTouched, goal, opts = {}) {
 
     let acceptance = { applicable: false, checks: [], failed: [] };
     let smoke = { skipped: true, reason: 'no web project', ok: true };
+    let functional = { skipped: true, reason: 'no web project' };
     let hasHtml = false;
     let combinedHtml = '', combinedJs = '', combinedCss = '';
 
@@ -293,6 +333,15 @@ async function runValidation(projectRoot, filesTouched, goal, opts = {}) {
             for (const i of wv.validateConstantsMatchData(combinedJs)) messages.push(`[DATA] ${i.message}`);
         }
 
+        // DOM contract: JS must not reference ids / form controls the HTML never defines
+        // (the "selectors don't match, app silently does nothing" failure).
+        if (combinedJs.trim() && combinedHtml.trim()) {
+            ranChecks++;
+            for (const i of wv.validateDomIdConsistency({ html: combinedHtml, js: combinedJs })) {
+                if (i.level === 'error') messages.push(`[DOM] ${i.message}`);
+            }
+        }
+
         // task acceptance (games)
         acceptance = runAcceptance(goal, { html: combinedHtml, js: combinedJs });
         if (acceptance.applicable) {
@@ -321,6 +370,17 @@ async function runValidation(projectRoot, filesTouched, goal, opts = {}) {
                 }
             } catch (e) { /* non-fatal */ }
         }
+
+        // Functional smoke (jsdom, optional dep): for interactive/CRUD goals, drive the first
+        // form and confirm it works. Errors block; if jsdom is unavailable it is RECORDED (not
+        // silently skipped) but never blocks — you cannot fail a build over a missing dev dep.
+        try {
+            functional = await runFunctionalSmoke({ projectRoot, htmlRel, goal });
+            if (!functional.skipped && !functional.unavailable) {
+                ranChecks++;
+                for (const e of (functional.errors || [])) messages.push(`[FUNCTIONAL] ${e}`);
+            }
+        } catch (e) { functional = { skipped: true, reason: 'functional smoke error' }; }
     }
 
     const planMsg = await runPlanTestVerify(projectRoot, opts.planArtifacts);
@@ -355,7 +415,7 @@ async function runValidation(projectRoot, filesTouched, goal, opts = {}) {
     if (ranChecks === 0 && opts.agentRanOkAfterEdit) ranChecks++;
 
     const status = deriveStatus({ filesCount: files.length, ranChecks, messages, hasHtml });
-    return { messages, missingRefs, ranChecks, status, acceptance, smoke, hasHtml, allow: status === 'done' };
+    return { messages, missingRefs, ranChecks, status, acceptance, smoke, functional, hasHtml, allow: status === 'done' };
 }
 
 function deriveStatus({ filesCount, ranChecks, messages, hasHtml }) {
@@ -460,9 +520,8 @@ function formatGateMessage(result, goal, projectRoot) {
     const artifactHint = noOutput && goal
         ? buildNewArtifactBlock(goal, projectRoot || '')
         : '';
-    const sub = goal ? suggestArtifactSubdir(goal) : 'app';
     const previewHint = noOutput && goalWantsPreview(goal)
-        ? `Then call show_preview with path "${sub}/index.html".`
+        ? 'Once the files exist and load cleanly, call show_preview on your index.html.'
         : '';
     const lines = noOutput
         ? [
@@ -480,7 +539,9 @@ function formatGateMessage(result, goal, projectRoot) {
             '',
             ...msgs.map(m => `- ${m}`),
             '',
-            'Use read_file to inspect broken files. Use patch or write_file to fix them.',
+            msgs.some(m => /^\[(DOM|ARTIFACT|FUNCTIONAL)\]/.test(m))
+                ? 'Repair required: apply the SMALLEST patch that resolves each item above — rename the selector/control in index.html OR script.js so they match (not both), or create the missing file. Do NOT re-explore or rewrite from scratch; make the targeted edits now with patch.'
+                : 'Use read_file to inspect broken files. Use patch or write_file to fix them.',
             'All files must parse, every referenced file must exist, CSS selectors must match the classes/ids',
             'used in JS/HTML, constants must match map/array dimensions, and the page must load without errors.'
         ];
@@ -497,6 +558,7 @@ module.exports = {
     runMilestoneVerify,
     deriveStatus,
     checkCompletion,
+    findProjectIndexHtml,
     formatGateMessage,
     formatBeforeDoneMessage,
     goalImpliesBuildWork

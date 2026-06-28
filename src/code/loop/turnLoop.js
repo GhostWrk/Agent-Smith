@@ -321,10 +321,17 @@ async function runTurnLoop(ctx) {
         session.turn++;
         dedup.reset();
 
+        // Empty workspace + nothing written yet → write-first: drop read/search/preview so the
+        // model creates files immediately instead of exploring an empty folder. Lifts as soon
+        // as the first file exists (then read_file/patch are back for verify/fixes).
+        const writeOnly = session.emptyWorkspace
+            && session.phase === 'implement'
+            && !(session.filesTouched || []).length;
         const tools = selectToolsForTurn({
             userPrompt: userPrompt || session.goal,
             turnIndex: session.turn - 1,
             phase: session.phase,
+            writeOnly,
             pluginToolNames,
             pluginToolSchemas
         });

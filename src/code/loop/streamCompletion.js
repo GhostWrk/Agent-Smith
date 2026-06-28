@@ -34,7 +34,13 @@ function messagesForWire(messages) {
 
 async function streamCompletion({
     apiBaseUrl, model, messages, tools, signal, onDelta, maxTokens, temperature,
-    requestTimeoutMs = 300000, inactivityTimeoutMs = 60000, constrain = false
+    requestTimeoutMs = 300000,
+    // Between-token idle window (env-tunable). The FIRST token gets a more generous window
+    // because heavy prompt-processing (large context + a big single write_file like script.js)
+    // can legitimately take longer than the mid-stream gap before the model starts emitting.
+    inactivityTimeoutMs = Number(process.env.XK_CODE_STREAM_IDLE_MS) || 60000,
+    firstTokenTimeoutMs = Number(process.env.XK_CODE_STREAM_FIRST_TOKEN_MS) || Math.max(inactivityTimeoutMs, 120000),
+    constrain = false
 }) {
     const url = `${apiBase(apiBaseUrl)}/v1/chat/completions`;
     // Send an EXPLICIT positive max_tokens. max_tokens:-1 is mishandled by several servers
@@ -74,11 +80,11 @@ async function streamCompletion({
             clearTimeout(idleTimer);
             fn(value);
         };
-        const armIdleTimer = (req) => {
+        const armIdleTimer = (req, ms = inactivityTimeoutMs) => {
             clearTimeout(idleTimer);
             idleTimer = setTimeout(() => {
-                req.destroy(new Error(`LM Studio response stalled for ${inactivityTimeoutMs}ms`));
-            }, inactivityTimeoutMs);
+                req.destroy(new Error(`LM Studio response stalled for ${ms}ms`));
+            }, ms);
         };
         const req = lib.request({
             hostname: parsed.hostname,
@@ -114,7 +120,7 @@ async function streamCompletion({
             let sawReasoning = false;
 
             res.on('data', (chunk) => {
-                armIdleTimer(req);
+                armIdleTimer(req, inactivityTimeoutMs); // data flowing — use the between-token window
                 buffer += chunk.toString();
                 const lines = buffer.split('\n');
                 buffer = lines.pop() || '';
@@ -196,7 +202,7 @@ async function streamCompletion({
         hardTimer = setTimeout(() => {
             req.destroy(new Error(`LM Studio request timed out after ${requestTimeoutMs}ms`));
         }, requestTimeoutMs);
-        armIdleTimer(req);
+        armIdleTimer(req, firstTokenTimeoutMs); // generous window for prompt-processing / first token
         req.on('error', error => finish(reject, error));
         if (signal) {
             if (signal.aborted) {

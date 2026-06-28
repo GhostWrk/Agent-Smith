@@ -38,7 +38,9 @@ test('when all referenced files DO exist on disk, the gate can pass', async () =
         '<!doctype html><html><body><script src="utils.js"></script></body></html>');
     fs.writeFileSync(path.join(root, 'site', 'utils.js'), 'window.id=function(){return 1;};\n');
     const res = await checkCompletion(root, ['site/utils.js'], KANBAN, {});
-    assert.ok(!(res.messages || []).some(m => /missing|not found/i.test(m)),
+    // No missing-FILE errors when refs resolve. (Functional [ACCEPT] capability messages are a
+    // separate, expected signal for an interactive-app goal and are not asserted here.)
+    assert.ok(!(res.missingRefs || []).length && !(res.messages || []).some(m => /missing on disk|references .* — create|not found/i.test(m)),
         'no missing-file errors when refs resolve; got: ' + JSON.stringify(res.messages));
 });
 

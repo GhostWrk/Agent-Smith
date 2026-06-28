@@ -11,7 +11,7 @@ const { buildBootstrapBlock } = require('../context/bootstrap.js');
 const { detectProjectCommands } = require('../../shared/verificationHarness.js');
 const { EarlyStopDetector } = require('../governor/earlyStop.js');
 const { QualityMonitor } = require('../governor/qualityMonitor.js');
-const { resolveInitialPhase } = require('../loop/phases.js');
+const { resolveInitialPhase, isGreenfieldWorkspace } = require('../loop/phases.js');
 const { runTurnLoop } = require('./turnLoop.js');
 const { createRunWatchdog } = require('./runWatchdog.js');
 const { runPlanningPhase } = require('./planningPhase.js');
@@ -266,6 +266,10 @@ async function runCodeTask(opts) {
 
         session.phase = resolveInitialPhase({ projectRoot, treeSummary, goal: prompt });
         session.greenfield = session.phase === 'implement';
+        // True empty workspace (nothing meaningful on disk) — used to force a write-first turn
+        // so the model doesn't explore an empty folder. Distinct from `greenfield`, which is
+        // also true for "new artifact in an existing repo".
+        session.emptyWorkspace = isGreenfieldWorkspace(projectRoot, treeSummary);
         session.projectMeta = detectProjectCommands(session.projectRoot || projectRoot);
         session.grindMode = opts.grindMode !== false;
 

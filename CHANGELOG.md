@@ -1,5 +1,26 @@
 # Agent Smith Changelog
 
+## [46.17.0] - 2026-06-28 — Code Mode: functional verification, less exploration, no false stalls
+
+Code Mode only — Chat and Agent Mode behavior is unchanged.
+
+### Added
+- **Web-app functional acceptance** (`acceptance.js`) — non-game interactive apps (todo/tracker/kanban/budget/calculator…) now get capability checks like games do: responds to input + updates the DOM, plus list-state and persistence when the goal implies them. Empty shells are blocked; static pages and calculators are not force-failed.
+- **Required-artifact enforcement** — files the prompt explicitly names (e.g. `README.md`) must exist or completion is blocked (`[ARTIFACT] …`).
+- **DOM-contract consistency** (`webValidators.validateDomIdConsistency`) — JS that references an id/`form.field` the HTML never defines is blocked (`[DOM] script references #type-filter … did you mean #filter-type?`). Tolerates `a || b || c` fallback chains and dynamically-created ids.
+- **jsdom functional smoke** (`functionalSmoke.js`, optional dep) — for interactive goals, loads the app, fills + submits the first form and fails on an uncaught error or a submit that changes nothing (`[FUNCTIONAL] …`). Patches jsdom's missing `form.namedField` access so working apps don't false-fail; reports unavailable (never silent) if jsdom isn't installed.
+- **Write-first on empty workspaces** — a greenfield build's first turn offers only write tools (no read/grep/glob/list/preview), so the model creates files immediately instead of exploring an empty folder. Full toolset returns once a file exists.
+- **Configurable stream timeouts** — `XK_CODE_STREAM_IDLE_MS` (between-token) and a separate, generous **first-token** window (`XK_CODE_STREAM_FIRST_TOKEN_MS`, default 120s) so a heavy single `write_file` (large context) isn't killed as a false "stall".
+- **Stall/reasoning visibility** — `stream_retry` and `reasoning_truncated` now render as timeline rows instead of blank turn bars.
+
+### Changed / Fixed
+- Plan/artifact paths are **model-led** — bootstrap and recovery nudges no longer prescribe `pacman/`/`app/`/`site/`; path enforcement comes from disk truth.
+- **Host-aware missing-ref seeding** — in an Electron/app repo, seeding uses the deliverable's subfolder index.html, never the host root.
+- Pac-Man last-resort scaffold writes now go through the change ledger (revertable).
+
+Verified: full suite 511/511, harness-eval 10/10, harness-security 6/6. Real `runCodeTask` E2E (qwen3-coder): write-first gives 0 pre-write exploration; the gate correctly blocks a broken app (kebab/camel id mismatch + missing README that acceptance and smoke both passed) and passes a correct app that runs in a real browser.
+
+
 ## [46.16.3] - 2026-06-28 — Code Mode: task-appropriate plan wording (no game language for non-games)
 
 Code Mode only — Chat and Agent Mode behavior is unchanged.

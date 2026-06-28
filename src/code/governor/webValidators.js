@@ -468,6 +468,125 @@ function detectSerializationArtifacts(text) {
     return issues;
 }
 
+// ---------------------------------------------------------------------------
+// DOM contract: JS references an id/form-control that the HTML must actually define
+// ---------------------------------------------------------------------------
+
+/** IDs the JS CREATES dynamically — so a getElementById for them is legitimate. */
+function extractJsCreatedIds(js) {
+    const raw = String(js || '');
+    const ids = new Set();
+    for (const m of raw.matchAll(/\.id\s*=\s*['"]([A-Za-z_][\w-]*)['"]/g)) ids.add(m[1]);            // el.id = 'x'
+    for (const m of raw.matchAll(/setAttribute\s*\(\s*['"]id['"]\s*,\s*['"]([A-Za-z_][\w-]*)['"]/g)) ids.add(m[1]);
+    for (const m of raw.matchAll(/\bid\s*=\s*["']([A-Za-z_][\w-]*)["']/g)) ids.add(m[1]);            // id="x" inside template/innerHTML strings
+    return ids;
+}
+
+// Standard HTMLFormElement / DOM members — accessing these on a form var is never a control.
+const STD_FORM_PROPS = new Set([
+    'addEventListener', 'removeEventListener', 'dispatchEvent', 'submit', 'reset', 'requestSubmit',
+    'checkValidity', 'reportValidity', 'elements', 'length', 'name', 'method', 'action', 'target',
+    'enctype', 'acceptCharset', 'autocomplete', 'noValidate', 'value', 'id', 'className', 'classList',
+    'dataset', 'style', 'parentNode', 'parentElement', 'children', 'childNodes', 'querySelector',
+    'querySelectorAll', 'appendChild', 'removeChild', 'insertBefore', 'remove', 'closest', 'matches',
+    'getAttribute', 'setAttribute', 'removeAttribute', 'hasAttribute', 'innerHTML', 'outerHTML',
+    'textContent', 'innerText', 'focus', 'blur', 'scrollIntoView', 'getBoundingClientRect', 'disabled',
+    'hidden', 'title', 'tagName', 'nodeName', 'nodeType', 'attributes', 'contains', 'cloneNode',
+    'onsubmit', 'onreset', 'onchange', 'oninput', 'onclick', 'checked', 'files', 'append', 'prepend'
+]);
+
+// `getElementById('a') || getElementById('b') || ...` is a legitimate fallback: the model
+// tries several ids and uses whichever exists. Group their ids so a missing alternative is
+// NOT flagged when at least one in the chain is present.
+function fallbackIdGroups(js) {
+    // A chain term is any element lookup (by id OR class) — a class term keeps the chain intact
+    // (e.g. getElementById('a') || querySelector('.b') || getElementById('c')).
+    const term = String.raw`(?:document\.)?(?:getElementById\s*\(\s*['"][\w-]+['"]\s*\)|querySelector(?:All)?\s*\(\s*['"][.#][\w-]+['"]\s*\))`;
+    const chainRe = new RegExp(`${term}(?:\\s*\\|\\|\\s*${term})+`, 'g');
+    const idRe = /getElementById\s*\(\s*['"]([\w-]+)['"]|querySelector(?:All)?\s*\(\s*['"]#([\w-]+)['"]/g;
+    const groups = [];
+    for (const m of String(js || '').matchAll(chainRe)) {
+        const ids = [...m[0].matchAll(idRe)].map(x => x[1] || x[2]).filter(Boolean);
+        if (ids.length > 1) groups.push(ids);
+    }
+    return groups;
+}
+
+/** Closest existing id to a missing one — same token set (filter-type ↔ type-filter) wins. */
+function closestId(target, known) {
+    const toks = (s) => new Set(String(s).toLowerCase().split(/[-_]+/).filter(Boolean));
+    const tset = toks(target);
+    let fallback = null;
+    for (const k of known) {
+        const kset = toks(k);
+        if (tset.size && tset.size === kset.size && [...tset].every(t => kset.has(t))) return k; // reordering
+        const overlap = [...tset].filter(t => kset.has(t)).length;
+        if (overlap && overlap >= tset.size - 1 && !fallback) fallback = k; // near-match
+    }
+    return fallback;
+}
+
+/** name= and id= of the form controls present in the HTML. */
+function extractFormControlNames(html) {
+    const names = new Set();
+    for (const m of String(html || '').matchAll(/<(?:input|select|textarea|button)\b[^>]*>/gi)) {
+        const n = m[0].match(/\bname\s*=\s*["']([^"']+)["']/i);
+        if (n) names.add(n[1]);
+        const id = m[0].match(/\bid\s*=\s*["']([^"']+)["']/i);
+        if (id) names.add(id[1]); // form.X resolves by control name OR (for getElementById flows) id
+    }
+    return names;
+}
+
+/**
+ * The headline failure: JS reads a DOM contract the HTML never fulfills. Two cases:
+ *   1. getElementById('x') / querySelector('#x') where no id="x" exists (and JS never creates it).
+ *   2. form.<field> where the <form> has no control named/id'd <field>.
+ * Precision: ids the JS creates dynamically are excluded; form access only on form-named vars,
+ * non-standard non-method props, and only when a <form> exists.
+ */
+function validateDomIdConsistency({ html, js }) {
+    const issues = [];
+    const H = String(html || '');
+    const J = String(js || '');
+    if (!J.trim() || !H.trim()) return issues;
+
+    const refIds = extractJsClassesIds(J).ids;
+    if (refIds.size) {
+        const htmlIds = extractHtmlClassesIds(H).ids;
+        const known = new Set([...htmlIds, ...extractJsCreatedIds(J)]);
+        // Fallback chains (a || b || c): if any exists, none of the alternatives is "missing".
+        const satisfied = new Set();
+        for (const g of fallbackIdGroups(J)) {
+            if (g.some(id => known.has(id))) g.forEach(id => satisfied.add(id));
+        }
+        for (const id of refIds) {
+            if (!known.has(id) && !satisfied.has(id)) {
+                const hint = closestId(id, htmlIds);
+                issues.push({ level: 'error', code: 'dom-id-missing', id, suggestion: hint,
+                    message: `script references #${id} but no element with id="${id}" exists in the HTML`
+                        + (hint ? ` — did you mean #${hint}? Fix index.html or the script (smallest patch).` : '') });
+            }
+        }
+    }
+
+    if (/<form\b/i.test(H)) {
+        const controls = extractFormControlNames(H);
+        const seen = new Set();
+        for (const m of J.matchAll(/\b([A-Za-z_]\w*)\s*\.\s*([A-Za-z_]\w*)\b(?!\s*\()/g)) {
+            const varName = m[1], prop = m[2];
+            if (!/form$/i.test(varName)) continue;          // only a form-named variable
+            if (STD_FORM_PROPS.has(prop) || seen.has(prop)) continue;
+            seen.add(prop);
+            if (!controls.has(prop)) {
+                issues.push({ level: 'error', code: 'form-control-missing', id: prop,
+                    message: `script references form.${prop} but the form has no control named "${prop}"` });
+            }
+        }
+    }
+    return issues;
+}
+
 module.exports = {
     HTML_TAGS,
     stripCssComments,
@@ -480,11 +599,14 @@ module.exports = {
     parseCssBalanced,
     classifyCssSelectors,
     extractJsClassesIds,
+    extractJsCreatedIds,
+    extractFormControlNames,
     extractJsAppliedClasses,
     findUndefinedConstants,
     validateConstantsMatchData,
     parseArrayRows,
     validateSelectorsMatch,
+    validateDomIdConsistency,
     validateRenderedClassesStyled,
     detectSerializationArtifacts
 };

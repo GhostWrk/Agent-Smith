@@ -282,6 +282,11 @@ async function scaffoldPacmanFile(session, execDeps, emit, relPath, content, rea
 
     try {
         await fs.promises.mkdir(path.dirname(abs), { recursive: true });
+        // Record the create in the change ledger so this last-resort write is captured by
+        // "Revert All" like a normal tool write (abs is known-not-to-exist — checked above).
+        if (execDeps?.changeLedger?.recordCreate) {
+            await execDeps.changeLedger.recordCreate(session.id, abs).catch(() => {});
+        }
         await fs.promises.writeFile(abs, content, 'utf8');
     } catch (e) {
         return null;

@@ -48,13 +48,42 @@ function collectMissingRefsFromHtml(projectRoot, htmlRelPath) {
     return [...new Set(missing)];
 }
 
+const SCAN_IGNORE = new Set(['node_modules', 'dist', 'build', '.git', '.agentsmith', 'release', 'coverage', '.cache']);
+
+/**
+ * The DELIVERABLE index.html (disk truth), host-aware: prefer one the model wrote this run, and
+ * in an Electron/app host repo never treat the host's ROOT index.html as the deliverable — only
+ * a subfolder index counts. Mirrors the completion gate's detectAppRepo guard.
+ */
+function findDeliverableIndexHtml(projectRoot, filesTouched) {
+    const touched = (filesTouched || []).find(f => /(^|\/)index\.html$/i.test(String(f)));
+    if (touched && fs.existsSync(path.join(projectRoot, touched))) {
+        return String(touched).replace(/\\/g, '/');
+    }
+    const { detectAppRepo } = require('../context/artifactHints.js');
+    if (!detectAppRepo(projectRoot)) {
+        const { findProjectIndexHtml } = require('../governor/completionGate.js');
+        return findProjectIndexHtml(projectRoot); // non-host repo: root-first is fine
+    }
+    // Host repo: the root index.html belongs to the host app — only a subfolder index is ours.
+    try {
+        for (const e of fs.readdirSync(projectRoot, { withFileTypes: true })) {
+            if (!e.isDirectory() || e.name.startsWith('.') || SCAN_IGNORE.has(e.name)) continue;
+            if (fs.existsSync(path.join(projectRoot, e.name, 'index.html'))) return `${e.name}/index.html`;
+        }
+    } catch (e) { /* ignore */ }
+    return null;
+}
+
 /** Seed pending refs when HTML already exists on disk (brownfield / resumed runs). */
 function seedPendingMissingRefs(session, goal) {
     if (!session?.projectRoot) return [];
-    const { goalImpliesNewArtifacts, suggestArtifactSubdir } = require('../context/artifactHints.js');
+    const { goalImpliesNewArtifacts } = require('../context/artifactHints.js');
     if (!goalImpliesNewArtifacts(goal || session.goal)) return [];
-    const sub = suggestArtifactSubdir(goal || session.goal);
-    const htmlRel = `${sub}/index.html`;
+    // Disk truth, host-aware: the deliverable index.html — never the host root in an app repo.
+    // If none exists yet, seed nothing — syncPendingAfterHtmlWrite picks it up on the HTML write.
+    const htmlRel = findDeliverableIndexHtml(session.projectRoot, session.filesTouched);
+    if (!htmlRel) return [];
     const missing = collectMissingRefsFromHtml(session.projectRoot, htmlRel);
     if (missing.length) {
         session.pendingMissingRefs = missing;

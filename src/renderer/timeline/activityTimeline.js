@@ -448,6 +448,32 @@
             break;
         }
 
+        case 'stream_retry': {
+            // The model stalled mid-reply and the harness is retrying — without this row the
+            // turn looks blank (no Thinking panel, no tools), reading as a frozen/dead run.
+            const row = document.createElement('div');
+            row.className = 'activity-retry';
+            row.style.cssText = 'margin:6px 0;padding:6px 10px;border-left:3px solid #e78a4e;'
+                + 'background:rgba(231,138,78,0.08);border-radius:4px;font-size:12px;line-height:1.4;color:var(--text-muted,#bbb);';
+            row.textContent = '⟳ ' + (ev.message
+                || `Model stalled — retrying${ev.attempt ? ` (${ev.attempt})` : ''}.`);
+            insertBeforeAnchor(row);
+            scrollBottom();
+            break;
+        }
+
+        case 'reasoning_truncated': {
+            const row = document.createElement('div');
+            row.className = 'activity-advisory';
+            row.style.cssText = 'margin:6px 0;padding:6px 10px;border-left:3px solid #d8a657;'
+                + 'background:rgba(216,166,55,0.08);border-radius:4px;font-size:12px;line-height:1.4;color:var(--text-muted,#bbb);';
+            row.textContent = '… ' + (ev.message
+                || 'Model spent the whole reply reasoning with no output — retrying with a larger budget.');
+            insertBeforeAnchor(row);
+            scrollBottom();
+            break;
+        }
+
         case 'context_budget':
             if (deps.onStatusUpdate && node) {
                 deps.onStatusUpdate({

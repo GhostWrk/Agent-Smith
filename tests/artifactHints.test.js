@@ -32,30 +32,33 @@ test('detectAppRepo recognizes electron host projects', () => {
     assert.equal(detectAppRepo(root), true);
 });
 
-test('buildNewArtifactBlock warns against root index.html in app repos', () => {
+test('buildNewArtifactBlock warns against root index.html in app repos (model chooses layout)', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'artifact-block-'));
     fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ main: 'main.js' }));
     fs.writeFileSync(path.join(root, 'main.js'), '// electron\n');
     fs.writeFileSync(path.join(root, 'index.html'), '<html></html>\n');
     const goal = 'Create a web based pac-man game and show preview';
     const block = buildNewArtifactBlock(goal, root);
-    assert.match(block, /pacman\/index\.html/);
+    assert.match(block, /host app|root index\.html/i);     // warns against the host root
+    assert.match(block, /subfolder of your choice/i);       // model picks the path, not a hardcoded one
     assert.match(block, /show_preview/);
-    assert.match(block, /NOT your game|host app/i);
+    assert.doesNotMatch(block, /pacman\//);                 // no overfit subdir
 });
 
-test('buildWriteNudge lists concrete write_file sequence', () => {
+test('buildWriteNudge requires writes without prescribing a subdir', () => {
     const nudge = buildWriteNudge('Create a web based pac-man game and show preview', '/proj');
-    assert.match(nudge, /write_file path="pacman\/index\.html"/);
+    assert.match(nudge, /write_file/);
     assert.match(nudge, /show_preview/);
+    assert.doesNotMatch(nudge, /pacman\//);                 // model chooses the layout
 });
 
 test('formatGateMessage includes artifact hints when no files written', () => {
     const msg = formatGateMessage({
         messages: ['No project files were created or modified yet.']
     }, 'Create a web based pac-man game and show preview', '/proj');
-    assert.match(msg, /pacman/);
     assert.match(msg, /show_preview/);
+    assert.match(msg, /write|create/i);
+    assert.doesNotMatch(msg, /pacman\//);
 });
 
 test('buildMissingRefsNudge lists each missing file', () => {

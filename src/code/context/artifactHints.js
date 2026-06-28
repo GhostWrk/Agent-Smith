@@ -44,28 +44,29 @@ function goalWantsPreview(goal) {
     return /\b(show|open|display|launch)\b.*\bpreview\b|\bpreview\b/i.test(String(goal || ''));
 }
 
-/** Bootstrap / gate nudge when building a new web artifact inside an app repo. */
+/** Bootstrap / gate nudge when building a new web deliverable. Model chooses the layout. */
 function buildNewArtifactBlock(goal, projectRoot) {
     if (!goalImpliesNewArtifacts(goal)) return '';
-    const sub = suggestArtifactSubdir(goal);
-    const lines = [
-        '',
-        '[NEW ARTIFACT — do not edit the host app]',
-        `Create a self-contained web deliverable under \`${sub}/\`: ${sub}/index.html, ${sub}/style.css, ${sub}/script.js.`,
-        'Link CSS/JS in HTML. Use backticks for JS template literals. CSS class names must match JS classList usage.'
-    ];
-    if (detectAppRepo(projectRoot)) {
+    const isAppRepo = detectAppRepo(projectRoot);
+    const lines = ['', '[NEW DELIVERABLE]'];
+    if (isAppRepo) {
         lines.push(
-            `This workspace is an Electron/app repo — the root index.html is NOT your game. Write under \`${sub}/\` only.`
+            'This workspace is an existing app/Electron repo — the root index.html belongs to the host app; do NOT edit it.',
+            'Create your deliverable as self-contained files in a NEW subfolder of your choice (name it for the task).'
+        );
+    } else {
+        lines.push(
+            'Create the files your task needs. For a static web app that is typically an index.html plus a linked style.css and script.js — choose whatever structure fits the task.'
         );
     }
-    if (goalWantsPreview(goal)) {
-        lines.push(`After the files exist, call show_preview with path \`${sub}/index.html\`.`);
-    }
     lines.push(
-        `All three files must live as siblings inside \`${sub}/\` — link as href="style.css" and src="script.js" (a bare same-folder name, not a path from the root index.html, and not split across other folders like src/).`,
-        'Start with write_file now — do not read the root index.html unless you are patching an existing file in this artifact.'
+        'Link CSS/JS from the HTML with paths relative to the HTML (same-folder files link as href="style.css" / src="script.js"). '
+            + 'CSS class names must match JS classList usage; use backticks for JS template literals.'
     );
+    if (goalWantsPreview(goal)) {
+        lines.push('After the files exist and load cleanly, call show_preview on your index.html.');
+    }
+    lines.push('Start with write_file now.');
     return lines.join('\n');
 }
 
@@ -76,21 +77,18 @@ function goalIsGame(goal) {
 
 /** Urgent system nudge after the completion gate blocks with zero writes. */
 function buildWriteNudge(goal, projectRoot) {
-    const sub = suggestArtifactSubdir(goal);
-    const preview = goalWantsPreview(goal) ? `\n4. show_preview path="${sub}/index.html"` : '';
+    const preview = goalWantsPreview(goal) ? ' Then call show_preview on your index.html.' : '';
     const jsDesc = goalIsGame(goal)
-        ? 'the complete game: state, input, loop, win/lose'
-        : 'the complete app logic (state, event handlers, persistence, rendering)';
+        ? 'the complete game (state, input, loop, win/lose)'
+        : 'the complete app logic (state, event handlers, rendering, and persistence if the task needs it)';
+    const where = detectAppRepo(projectRoot)
+        ? 'Put them in a NEW subfolder of your choice — do NOT touch the host root index.html.'
+        : 'Use whatever paths fit the task.';
     return [
         '[HARNESS — WRITE REQUIRED]',
-        'You stopped without creating files. Respond with tool calls ONLY (no prose).',
-        `Required sequence (all files as siblings in the SAME folder \`${sub}/\`):`,
-        `1. write_file path="${sub}/index.html" — complete HTML linking style.css and script.js`,
-        `2. write_file path="${sub}/style.css" — the complete stylesheet`,
-        `3. write_file path="${sub}/script.js" — ${jsDesc}${preview}`,
-        detectAppRepo(projectRoot)
-            ? `Do NOT patch the root index.html — it belongs to the host app.`
-            : `Create all three files before stopping again.`
+        'You stopped without creating any files. Respond with write_file tool calls ONLY (no prose).',
+        `Create the files your task needs — for a static web app that is an index.html plus the CSS and JS it links (${jsDesc}). ${where}`,
+        'Link each asset from the HTML with a relative path, and create every linked file before stopping.' + preview
     ].join('\n');
 }
 
@@ -124,16 +122,14 @@ function buildMissingRefsNudge(missingRefs, goal, projectRoot) {
 
 /** After harness recovery — keep the run going (preview / verify), do not treat as done. */
 function buildContinueAfterRecoveryNudge(goal, htmlRel, previewOpened) {
-    const sub = suggestArtifactSubdir(goal);
-    const html = htmlRel || `${sub}/index.html`;
     const noun = goalIsGame(goal) ? 'game' : 'app';
     const lines = [
         '[CONTINUE — run still active]',
         'Recovery finished. Do not stop or replan from scratch.',
         'Do NOT rewrite existing files unless fixing a validation error.'
     ];
-    if (goalWantsPreview(goal) && !previewOpened) {
-        lines.push(`NEXT (one tool call): show_preview kind=project_file target="${html}"`);
+    if (goalWantsPreview(goal) && !previewOpened && htmlRel) {
+        lines.push(`NEXT (one tool call): show_preview kind=project_file target="${htmlRel}"`);
     } else if (goalWantsPreview(goal)) {
         lines.push(`Preview was opened. Reply briefly that the ${noun} is ready.`);
     } else {

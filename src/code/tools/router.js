@@ -5,7 +5,7 @@
 'use strict';
 
 const { TOOL_CATEGORIES, schemasForNames, toolNames } = require('./schemas.js');
-const { allowedToolsForPhase } = require('../loop/phases.js');
+const { allowedToolsForPhase, WRITE_FIRST_TOOLS } = require('../loop/phases.js');
 
 const ALL = toolNames();
 
@@ -25,17 +25,20 @@ function withPlugins(coreSchemas, pluginToolSchemas) {
     return coreSchemas.concat(extra);
 }
 
-function selectToolsForTurn({ userPrompt, turnIndex, maxTools = 7, phase, pluginToolNames = [], pluginToolSchemas = [] }) {
+function selectToolsForTurn({ userPrompt, turnIndex, maxTools = 7, phase, writeOnly = false, pluginToolNames = [], pluginToolSchemas = [] }) {
     // Plugin tools are real, schema-backed tools (pluginManager.getEnabledToolSchemas).
     // They are offered in implement/verify phases (they may write/run), but NOT during
     // explore, which is read-only. Phase gating restricts writes — not a tool-count cap.
     const pluginAllowed = phase ? phase !== 'explore' : true;
-    const pluginExtra = pluginAllowed ? pluginToolSchemas : [];
+    const pluginExtra = (pluginAllowed && !writeOnly) ? pluginToolSchemas : [];
 
     // Phase-driven path (the default in the live loop): the phase tool set is small and
-    // intentional, so core tools are NEVER truncated.
+    // intentional, so core tools are NEVER truncated. writeOnly (empty workspace, nothing
+    // written yet) drops the read/search/preview tools so the model writes immediately
+    // instead of burning turns exploring an empty folder.
     if (phase) {
-        const names = allowedToolsForPhase(phase).slice();
+        let names = allowedToolsForPhase(phase).slice();
+        if (writeOnly) names = names.filter(n => WRITE_FIRST_TOOLS.has(n));
         return withPlugins(schemasForNames(names), pluginExtra);
     }
 
