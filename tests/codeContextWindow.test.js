@@ -34,3 +34,32 @@ test('resolveCodeNumCtx falls back to the request when the backend is unreachabl
     assert.equal(loadedContext, null);
     assert.equal(numCtx, 8192);
 });
+
+test('fetchLoadedContext never borrows a DIFFERENT model\'s window', async () => {
+    const { fetchLoadedContext } = require('../src/code/loop/contextWindow.js');
+    const realFetch = global.fetch;
+    // two models loaded; the in-use model reports no window -> must NOT borrow the other's 4096
+    global.fetch = async () => ({
+        ok: true,
+        json: async () => ({ data: [
+            { id: 'in-use-model', state: 'loaded' },
+            { id: 'other-model', state: 'loaded', loaded_context_length: 4096 }
+        ] })
+    });
+    try {
+        assert.equal(await fetchLoadedContext('http://x/v1', 'in-use-model'), null,
+            'ambiguous: must not borrow the other model window');
+        // exact id match is used when present
+        global.fetch = async () => ({ ok: true, json: async () => ({ data: [
+            { id: 'in-use-model', state: 'loaded', loaded_context_length: 24576 }
+        ] }) });
+        assert.equal(await fetchLoadedContext('http://x/v1', 'in-use-model'), 24576);
+        // a single unambiguously-loaded model is used even if the id differs slightly
+        global.fetch = async () => ({ ok: true, json: async () => ({ data: [
+            { id: 'sole-model', state: 'loaded', loaded_context_length: 16384 }
+        ] }) });
+        assert.equal(await fetchLoadedContext('http://x/v1', 'requested-id'), 16384);
+    } finally {
+        global.fetch = realFetch;
+    }
+});

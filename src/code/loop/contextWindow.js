@@ -35,9 +35,16 @@ async function fetchLoadedContext(apiBaseUrl, model) {
         if (!res || !res.ok) return null;
         const json = await res.json();
         const list = Array.isArray(json?.data) ? json.data : (Array.isArray(json) ? json : []);
-        const match = list.find(m => m?.id === model && m?.loaded_context_length)
-            || list.find(m => m?.state === 'loaded' && m?.loaded_context_length)
-            || list.find(m => m?.loaded_context_length);
+        // Use the IN-USE model's window. If it isn't matched by id, only fall back to a single
+        // unambiguously-loaded model — never borrow some OTHER loaded model's window (that would
+        // clamp Code Mode to a size that doesn't belong to the model actually answering).
+        let match = list.find(m => m?.id === model && m?.loaded_context_length);
+        // Only fall back to a single loaded model when the requested id is ABSENT entirely. If the
+        // requested model is listed but reports no window, do NOT borrow another model's window.
+        if (!match && !list.some(m => m?.id === model)) {
+            const loaded = list.filter(m => m?.state === 'loaded' && m?.loaded_context_length);
+            if (loaded.length === 1) match = loaded[0];
+        }
         const n = match && Number(match.loaded_context_length);
         return Number.isFinite(n) && n > 0 ? n : null;
     } catch (e) {

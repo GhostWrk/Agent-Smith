@@ -395,21 +395,29 @@ async function runTurnLoop(ctx) {
                 allow: gate.allow
             };
         } else {
-            validation = await runValidation(
-                session.projectRoot,
-                session.filesTouched,
-                session.goal,
-                {
-                    planArtifacts: planArtifacts || session.planArtifacts,
-                    grindMode: session.grindMode !== false,
-                    projectMeta: session.projectMeta,
-                    agentRanOkAfterEdit: session.agentRanOkAfterEdit,
-                    // Honest final verdict: even when the run ends without a completion
-                    // reflection (e.g. early-stop), still load the built web app in a real
-                    // browser so the status reflects whether it actually runs.
-                    runtimeVerify: execDeps && execDeps.runtimeVerify
-                }
-            );
+            // A validation error must NOT sink the whole run (which would lose the verdict and
+            // final summary and surface as a bare "error"). Fall back to an honest 'unverified'.
+            try {
+                validation = await runValidation(
+                    session.projectRoot,
+                    session.filesTouched,
+                    session.goal,
+                    {
+                        planArtifacts: planArtifacts || session.planArtifacts,
+                        grindMode: session.grindMode !== false,
+                        projectMeta: session.projectMeta,
+                        agentRanOkAfterEdit: session.agentRanOkAfterEdit,
+                        // Honest final verdict: even when the run ends without a completion
+                        // reflection (e.g. early-stop), still load the built web app in a real
+                        // browser so the status reflects whether it actually runs.
+                        runtimeVerify: execDeps && execDeps.runtimeVerify,
+                        changeLedger: execDeps && execDeps.changeLedger,
+                        sessionId: session.id
+                    }
+                );
+            } catch (e) {
+                validation = { status: 'unverified', messages: [], ranChecks: 0, acceptance: undefined, smoke: undefined, allow: false };
+            }
         }
         let status = validation.status;
         if (reason && status === 'done' && validation.ranChecks === 0) status = 'unverified';

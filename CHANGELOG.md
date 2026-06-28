@@ -1,5 +1,17 @@
 # Agent Smith Changelog
 
+## [46.23.0] - 2026-06-28 — Code Mode polish (context window targeting, scaffold safety, resilient finalize)
+
+Code Mode only. Remaining audit polish.
+
+### Fixed
+- **Context-window targeting** (`contextWindow.js`): `fetchLoadedContext` no longer borrows a *different* model's window. It uses the in-use model's window by exact id; only when the requested id is absent entirely does it fall back to a single unambiguously-loaded model — otherwise it fails open to the requested value.
+- **Pac-Man scaffold safety** (`harnessScaffold.js`): the last-resort scaffold never writes to the project root of an existing app/Electron repo (it drops the game into a `pacman/` subfolder instead), so it can't clobber a host app's root index.html. (It was already ledgered.)
+- **Resilient finalize** (`turnLoop.js`): a validation error during the final verdict no longer sinks the whole run (losing the status + summary and surfacing as a bare error) — it falls back to an honest `unverified`. The final validation's web-wiring repair is now ledgered too.
+
+Verified: +fetchLoadedContext regression test (never borrows another model's window). Suite 568/568, harness-eval 10/10, harness-security 6/6.
+
+
 ## [46.22.0] - 2026-06-28 — Code Mode robustness (context budget, resume durability, background cleanup)
 
 Code Mode only. Robustness fixes from the aggressive audit.

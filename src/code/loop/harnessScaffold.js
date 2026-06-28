@@ -8,7 +8,8 @@ const path = require('path');
 const { pickNextMissing, clearPendingIfCreated } = require('./missingRefGuard.js');
 const {
     goalWantsPreview,
-    buildContinueAfterRecoveryNudge
+    buildContinueAfterRecoveryNudge,
+    detectAppRepo
 } = require('../context/artifactHints.js');
 const { executeTool } = require('../tools/executor.js');
 
@@ -337,7 +338,13 @@ function pacmanArtifactDir(session) {
     const touched = Array.isArray(session?.filesTouched) ? session.filesTouched : [];
     const preferred = touched.find(file => /(?:^|\/)index\.html$/i.test(file))
         || touched.find(file => /\.(?:css|js)$/i.test(file));
-    return preferred ? path.posix.dirname(String(preferred).replace(/\\/g, '/')) : 'pacman';
+    let dir = preferred ? path.posix.dirname(String(preferred).replace(/\\/g, '/')) : 'pacman';
+    // Never scaffold over a host app's root files: if the chosen dir is the project root and this
+    // workspace is an existing app/Electron repo, drop the game into its own subfolder instead.
+    if ((dir === '.' || dir === '') && session?.projectRoot && detectAppRepo(session.projectRoot)) {
+        dir = 'pacman';
+    }
+    return dir;
 }
 
 async function replacePacmanArtifacts(session, execDeps, emit, gate) {
