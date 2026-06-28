@@ -251,3 +251,1434 @@ which is by design.
 - `src/main/ipc/plugins.js:27` — `plugin-install` IPC handler.
 - `index.html` — `plugin-install-url` input field.
 - `AGENTS.md` — "Plugins" section.
+
+---
+
+# Per-file Bug Audit Checklist
+
+Use this section to scan the codebase batch by batch. For each file, add findings under `Bugs / notes` with severity, repro/impact, and proposed fix.
+
+## Batch 1 — Root / app entrypoints
+
+### `index.html`
+
+**Bugs / notes:**
+
+- TBD
+
+### `main.js`
+
+**Bugs / notes:**
+
+- **LOW — duplicate renderer console logging.** `mainWindow.webContents.on("console-message", ...)` is registered twice in a row, so every renderer console message is logged twice. Impact is noisy logs / harder debugging, not a security issue. Fix: remove one duplicate listener. Related code: `main.js:394-395`.
+- **MEDIUM — unbounded `/api/invoke` request body accumulation.** The mobile/web IPC proxy concatenates request chunks into `body` with no maximum size before `JSON.parse`. A LAN/web client, and potentially a Cloudflare tunnel client, can send a huge POST body and force memory growth. Fix: enforce a small max body size and return `413 Payload Too Large` / destroy the request once exceeded. Related code: `main.js:872-879`.
+- **MEDIUM — unauthenticated static source disclosure for any `.js` / `.css` / image path.** The auth gate treats any URL ending in `.js`, `.css`, `.png`, or `.jpg` as public, then static serving allows any contained path under the app directory. This likely lets unauthenticated LAN/web clients fetch backend source such as `src/main/ipc/auth.js`, `src/main/services/auth.js`, or `src/shared/commandPolicy.js` before login. Fix: restrict unauthenticated static files to an explicit login/renderer asset allowlist, not every source file extension. Related code: `main.js:787-803`, `main.js:962-986`.
+- **MEDIUM — auto-download and execute moving `cloudflared` binary without integrity verification.** Startup downloads `cloudflared` from GitHub `latest` release URLs and later spawns the downloaded binary, with no pinned version or checksum/signature verification. The URL is hardcoded, so this is not command injection, but it is a supply-chain/trust risk. Fix: pin a version and verify SHA256/signature, or require explicit user consent before first download/run. Related code: `main.js:1006-1033`.
+
+### `preload.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `replace-tools.js`
+
+**Bugs / notes:**
+
+- **LOW — obsolete/missing legacy-path migration helper appears to fail by default.** The script reads `hotfix2/v41.7/tools.js` and `hotfix2/v41.7/index.js` unconditionally; if those legacy files are not present, it throws before doing anything. This may be an old one-off helper rather than active app code. Fix: remove it if obsolete, or add existence checks and clear usage errors. Related code: `replace-tools.js:3-9`.
+
+### `run.sh`
+
+**Bugs / notes:**
+
+- TBD
+
+### `package.json`
+
+**Bugs / notes:**
+
+- TBD
+
+## Batch 2 — Code Mode: context / planning / session
+
+### `src/code/context/artifactHints.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/code/context/bootstrap.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/code/context/budget.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/code/context/gemmaHarness.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/code/context/phaseCompact.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/code/context/planAnchor.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/code/context/planArtifacts.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/code/context/symbolMap.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/code/plan/codePlan.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/code/session/state.js`
+
+**Bugs / notes:**
+
+- TBD
+
+## Batch 3 — Code Mode: governor
+
+### `src/code/governor/acceptance.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/code/governor/completionGate.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/code/governor/earlyStop.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/code/governor/postEditChecks.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/code/governor/projectRules.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/code/governor/qualityMonitor.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/code/governor/readiness.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/code/governor/smokeTest.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/code/governor/webValidators.js`
+
+**Bugs / notes:**
+
+- TBD
+
+## Batch 4 — Code Mode: loop / tools
+
+### `src/code/loop/codeTrace.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/code/loop/finalSummary.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/code/loop/harnessScaffold.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/code/loop/middleware.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/code/loop/milestoneSubagents.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/code/loop/missingRefGuard.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/code/loop/phases.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/code/loop/planningPhase.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/code/loop/reasoningStrip.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/code/loop/runCodeTask.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/code/loop/runWatchdog.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/code/loop/streamCompletion.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/code/loop/turnLoop.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/code/tools/dedup.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/code/tools/executor.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/code/tools/extractor.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/code/tools/jsonRepair.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/code/tools/planTools.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/code/tools/router.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/code/tools/schemas.js`
+
+**Bugs / notes:**
+
+- TBD
+
+## Batch 5 — Main process IPC / lifecycle / server
+
+### `src/main/ipc/actions.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/main/ipc/agent.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/main/ipc/auth.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/main/ipc/code.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/main/ipc/edit.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/main/ipc/git.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/main/ipc/history.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/main/ipc/index.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/main/ipc/ledger.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/main/ipc/lmStudio.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/main/ipc/memory.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/main/ipc/plugins.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/main/ipc/preview.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/main/ipc/project.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/main/lifecycle/whatsapp.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/main/server/previewRoutes.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/main/server/pushEvent.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/main/server/sseHub.js`
+
+**Bugs / notes:**
+
+- TBD
+
+## Batch 6 — Main process services
+
+### `src/main/services/actionLog.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/main/services/auth.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/main/services/browserVerify.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/main/services/changeLedger.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/main/services/editEngine.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/main/services/lmStudioManager.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/main/services/memory.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/main/services/pluginHost.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/main/services/pluginInstaller.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/main/services/pluginIntegrity.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/main/services/pluginManager.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/main/services/pluginSandbox.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/main/services/pluginSandboxRunner.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/main/services/previewRunner.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/main/services/previewService.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/main/services/projectContext.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/main/services/projectDetector.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/main/services/worktreeManager.js`
+
+**Bugs / notes:**
+
+- TBD
+
+## Batch 7 — Renderer
+
+### `src/renderer/app.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/renderer/effects/bgEffect.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/renderer/entry.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/renderer/modes/agentTools.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/renderer/modes/chatLoop.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/renderer/modes/code.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/renderer/modes/modeHistory.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/renderer/modes/runState.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/renderer/styles/base.css`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/renderer/styles/fonts.css`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/renderer/styles/overlay.css`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/renderer/timeline/activityTimeline.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/renderer/timeline/diffView.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/renderer/timeline/eventAdapter.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/renderer/ui/codePlanPanel.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/renderer/ui/codeRunUI.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/renderer/ui/contextLabel.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/renderer/ui/historyPersistence.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/renderer/ui/modeBar.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/renderer/ui/modelPicker.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/renderer/ui/previewPanel.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/renderer/ui/runtimeProfileUI.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/renderer/ui/scrollFollow.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/renderer/ui/sidebarLayout.js`
+
+**Bugs / notes:**
+
+- TBD
+
+## Batch 8 — Shared/security-relevant utilities
+
+### `src/shared/channelPolicy.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/shared/chatSummarizer.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/shared/commandPolicy.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/shared/contextPrune.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/shared/editFormats.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/shared/gitIntegration.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/shared/globTool.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/shared/grepTool.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/shared/ignoreFilter.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/shared/ipcChannels.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/shared/modelClassifier.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/shared/netGuard.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/shared/pathPolicy.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/shared/planTemplates.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/shared/renderThrottle.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/shared/repoMap.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/shared/runtimeProfile.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/shared/smithPersona.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/shared/verificationHarness.js`
+
+**Bugs / notes:**
+
+- TBD
+
+## Batch 9 — Scripts / harnesses
+
+### `scripts/agent-assistant-100-e2e.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `scripts/agent-assistant-parity-e2e.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `scripts/agent-e2e.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `scripts/agent-hard-e2e.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `scripts/agent-inapp-e2e.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `scripts/agent-live-e2e.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `scripts/agent-memory-recall-e2e.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `scripts/bootstrap.mjs`
+
+**Bugs / notes:**
+
+- TBD
+
+### `scripts/build-renderer.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `scripts/check-native.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `scripts/code-mode-100-e2e.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `scripts/code-smoke.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `scripts/create_icon.py`
+
+**Bugs / notes:**
+
+- TBD
+
+### `scripts/ghosttrace-cli.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `scripts/greenfield-smoke.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `scripts/install-linux-desktop.sh`
+
+**Bugs / notes:**
+
+- TBD
+
+### `scripts/print-download-link.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `scripts/readiness-report.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `scripts/ship-check.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `scripts/standalone-server.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `scripts/verify-main-ipc.js`
+
+**Bugs / notes:**
+
+- TBD
+
+## Batch 10 — Examples / plugins / ghosttrace
+
+### `examples/agentsmith-rules/no-console-in-src.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `examples/pacman/index.html`
+
+**Bugs / notes:**
+
+- TBD
+
+### `examples/pacman/script.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `examples/pacman/style.css`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/examples/plugins/hello/commands/greet.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/examples/plugins/hello/hooks/audit.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/examples/plugins/hello/plugin.json`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/examples/plugins/hello/tools/echo.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `src/ghosttrace/index.js`
+
+**Bugs / notes:**
+
+- TBD
+
+## Batch 11 — Tests, part 1
+
+### `tests/actionLog.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/activityTimeline.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/agentListDir.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/agentTools.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/artifactHints.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/artifactHintsNudge.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/auditContinuation.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/auditFixes.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/auth.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/autonomousGameBuild.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/beforeDone.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/codeMode.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/codeModeGeneral.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/codeModeReasoning.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/codePhases.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/codePlan.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/codePlanPanel.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/codeToolRegistry.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/codingTier2.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/contextPrune.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/coverageEngine.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/coverageSharedLogic.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/durable-modules.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/earlyStopNoProgress.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/editDeathSpiral.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/finalSummary.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/gemmaHarness.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/gitIntegration.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/harness-eval/capability/scenarios.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/harness-eval/regression/scenarios.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/harness-security/security.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/harnessExitPaths.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/harnessScaffold.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+## Batch 12 — Tests, part 2
+
+### `tests/historyPersistence.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/ipcHandlers.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/ipcResilience.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/jsonRepair.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/lenientExtract.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/lmStudioIpc.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/lmStudioManager.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/memoryCodeMode.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/memoryEmbedding.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/milestoneSubagents.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/missingRefGuard.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/modeBar.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/modeHistory.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/modelClassifier.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/multiFileDrive.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/pacmanRegression.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/pathPolicy.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/perfFreeze.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/phaseCompact.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/planArtifacts.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/planningPhase.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/pluginCodeMode.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/pluginIntegrity.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/pluginSandbox.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/pluginSystem.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/postEditChecks.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/previewPath.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/projectDetector.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/projectRoot.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/projectRules.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/reasoningStrip.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/rendererLoadOrder.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/runWatchdog.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/runtimeProfile.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/runtimeProfileUI.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/scrollFollow.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/securityPolicy.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/smithPersona.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/sseHub.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/subdirRefs.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/symbolMap.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/truncation.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/webValidators.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/whatsappChrome.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/whatsappOptional.test.js`
+
+**Bugs / notes:**
+
+- TBD
+
+### `tests/xmlToolCalls.test.js`
+
+**Bugs / notes:**
+
+- TBD
