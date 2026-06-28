@@ -155,8 +155,14 @@ module.exports = function registerCodeIpc(ipcMain, deps) {
         activeRun = { status: 'running', controller, sessionId: resumeSession?.id || null };
         const pluginToolSchemas = getPluginToolSchemas();
 
+        const runRoot = opts.projectRoot || resumeSession?.projectRoot || projectContext.getRoot();
+        // Pin the containment boundary to THIS run's project root so the path clamp and the
+        // run_command policy enforce it (otherwise they'd fall back to process.cwd()). The
+        // isolated-worktree path re-points this to the worktree inside runCodeTask.
+        if (runRoot) { try { projectContext.setRoot(runRoot); } catch (e) { /* non-fatal */ } }
+
         const base = {
-            projectRoot: opts.projectRoot || resumeSession?.projectRoot || projectContext.getRoot(),
+            projectRoot: runRoot,
             model: opts.model || resumeSession?.model,
             numCtx: opts.numCtx || resumeSession?.numCtx || 8192,
             apiBaseUrl: opts.apiBaseUrl || getLmsUrl?.() || 'http://127.0.0.1:1234',

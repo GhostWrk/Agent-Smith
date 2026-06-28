@@ -1,5 +1,13 @@
 # Agent Smith Changelog
 
+## [46.23.1] - 2026-06-28 — Code Mode: pin the containment root for every run
+
+### Fixed
+- `startCodeTask` now pins the project-context containment root to the active run's project root (the path clamp + run_command policy previously relied on it having been set elsewhere, and would otherwise fall back to process.cwd()). This makes the v46.21.0 symlink-safe path clamp and command policy actually enforce the run's boundary for normal (non-isolated) runs. The isolated-worktree path still re-points the root to its worktree.
+
+Verified end to end after the full security/robustness/polish pass: a real runCodeTask build passes (gate done, acceptance + smoke PASS) with 5 run_command calls and zero false blocks. Suite 568/568, harness-eval 10/10, harness-security 6/6.
+
+
 ## [46.23.0] - 2026-06-28 — Code Mode polish (context window targeting, scaffold safety, resilient finalize)
 
 Code Mode only. Remaining audit polish.
