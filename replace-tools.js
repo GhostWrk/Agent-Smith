@@ -1,12 +1,19 @@
 const fs = require('fs');
 
-const legacyToolsPath = 'hotfix2/v41.7/tools.js';
-const targetToolsPath = 'src/renderer/modes/agentTools.js';
-const legacyIndex = 'hotfix2/v41.7/index.js';
+const legacyToolsPath = process.argv[2] || 'hotfix2/v41.7/tools.js';
+const legacyIndex = process.argv[3] || 'hotfix2/v41.7/index.js';
+const targetToolsPath = process.argv[4] || 'src/renderer/modes/agentTools.js';
 
-let legacyToolsContent = fs.readFileSync(legacyToolsPath, 'utf8');
-let targetContent = fs.readFileSync(targetToolsPath, 'utf8');
-let legacyIndexContent = fs.readFileSync(legacyIndex, 'utf8');
+function readRequired(filePath, description) {
+    if (!fs.existsSync(filePath)) {
+        throw new Error(`${description} not found at ${filePath}. Usage: node replace-tools.js <legacy-tools.js> <legacy-index.js> [target-agentTools.js]`);
+    }
+    return fs.readFileSync(filePath, 'utf8');
+}
+
+let legacyToolsContent = readRequired(legacyToolsPath, 'Legacy tools file');
+let targetContent = readRequired(targetToolsPath, 'Target Agent tools file');
+let legacyIndexContent = readRequired(legacyIndex, 'Legacy index file');
 
 // Extract AGENT_TOOLS from legacy
 const toolsMatch = legacyToolsContent.match(/const AGENT_TOOLS = \[([\s\S]*?)\];/);

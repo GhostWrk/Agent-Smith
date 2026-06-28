@@ -380,7 +380,6 @@ function createWindow() {
     });
 
     mainWindow.webContents.on("console-message", (e, level, msg, line, sourceId) => console.log(`[Renderer] ${msg} (${sourceId}:${line})`));
-    mainWindow.webContents.on("console-message", (e, level, msg, line, sourceId) => console.log(`[Renderer] ${msg} (${sourceId}:${line})`));
     mainWindow.once('ready-to-show', () => {
         if (APP_ICON.img) mainWindow.setIcon(APP_ICON.img);
         mainWindow.show();
@@ -737,6 +736,33 @@ function getLocalIP() {
     return '127.0.0.1';
 }
 
+const WEB_INVOKE_MAX_BODY_BYTES = 1024 * 1024;
+const PUBLIC_FILE_PATHS = new Set([
+    '/',
+    '/index.html',
+    '/preload.js',
+    '/src/renderer/app.js',
+    '/src/renderer/effects/bgEffect.js',
+    '/src/renderer/ui/contextLabel.js',
+    '/dist/renderer/bundle.js',
+    '/node_modules/marked/marked.min.js',
+    '/icon.png',
+    '/build/icon.png',
+    '/build/icons/256x256.png',
+    '/src/renderer/login/assets/mr.-anderson,-welcome-back,-we-missed-you-made-with-Voicemod.mp3'
+]);
+const PUBLIC_FILE_PREFIXES = [
+    '/src/renderer/styles/',
+    '/build/icons/'
+];
+function isPublicStaticPath(urlPath) {
+    let decoded;
+    try { decoded = decodeURIComponent(urlPath); } catch (e) { decoded = urlPath; }
+    const normalized = path.posix.normalize('/' + decoded.replace(/^\/+/, ''));
+    if (normalized.includes('\0')) return false;
+    return PUBLIC_FILE_PATHS.has(normalized) || PUBLIC_FILE_PREFIXES.some(prefix => normalized.startsWith(prefix));
+}
+
 const webServer = http.createServer((req, res) => {
     // CORS Headers for Mobile Web Mode
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -772,8 +798,7 @@ const webServer = http.createServer((req, res) => {
         req.headers['x-auth-action'] === 'has-users'
     );
 
-    const publicFiles = ['/index.html', '/', '/src/renderer/app.js', '/preload.js', '/style.css', '/icon.png'];
-    const isPublicFile = publicFiles.includes(url) || url.endsWith('.css') || url.endsWith('.js') || url.endsWith('.png') || url.endsWith('.jpg');
+    const isPublicFile = isPublicStaticPath(url);
     const isDownloadRemote = url.startsWith('/download_remote');
 
     // Validated file handoff — allowed in open LAN mode without login; otherwise requires auth.
@@ -860,8 +885,23 @@ const webServer = http.createServer((req, res) => {
     // IPC Proxy for Web Clients
     if (url === '/api/invoke' && req.method === 'POST') {
         let body = '';
-        req.on('data', chunk => body += chunk.toString());
+        let bodyBytes = 0;
+        let rejected = false;
+        req.on('error', () => {});
+        req.on('data', chunk => {
+            if (rejected) return;
+            bodyBytes += chunk.length;
+            if (bodyBytes > WEB_INVOKE_MAX_BODY_BYTES) {
+                rejected = true;
+                res.writeHead(413, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+                res.end(JSON.stringify({ error: 'Request body too large' }));
+                req.destroy();
+                return;
+            }
+            body += chunk.toString();
+        });
         req.on('end', async () => {
+            if (rejected) return;
             try {
                 const { channel, args } = JSON.parse(body);
                 
@@ -999,6 +1039,10 @@ async function startCloudflareTunnel() {
     }
 
     if (!fs.existsSync(cfBinary) && downloadUrl) {
+        if (process.env.AGENT_SMITH_ALLOW_CLOUDFLARED_DOWNLOAD !== '1') {
+            console.log('Cloudflare Tunnel unavailable: cloudflared is not installed. Set AGENT_SMITH_ALLOW_CLOUDFLARED_DOWNLOAD=1 to allow Agent Smith to download it.');
+            return;
+        }
         console.log('Downloading cloudflared for remote hosting...');
         try {
             if (platform === 'linux') {
@@ -1047,9 +1091,7 @@ function startWebServer(attempt = 0) {
         console.log('\n=========================================');
         console.log(' Web Interface hosted at: http://' + getLocalIP() + ':' + WEB_PORT);
         console.log('=========================================\n');
-        // Opt-out for headless / automated runs: skip the cloudflared download +
-        // public tunnel (AGENT_SMITH_NO_TUNNEL=1). The local web UI still serves.
-        if (!process.env.AGENT_SMITH_NO_TUNNEL) startCloudflareTunnel().catch(console.error);
+        if (process.env.AGENT_SMITH_ENABLE_TUNNEL === '1' && !process.env.AGENT_SMITH_NO_TUNNEL) startCloudflareTunnel().catch(console.error);
     });
 }
 webServer.on('error', (err) => {
