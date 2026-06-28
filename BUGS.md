@@ -939,7 +939,7 @@ Use this section to scan the codebase batch by batch. For each file, add finding
 
 **Bugs / notes:**
 
-- TBD
+- **MEDIUM — long-option variants bypass catastrophic command blocking.** The guardrail blocks simple `rm -rf /`, `chmod -R ... /`, and `chown -R ... /` forms, but the regexes only understand short option clusters in fixed positions. Commands such as `rm --no-preserve-root -rf /`, `chmod --recursive 777 /`, and `chown --recursive root /` are currently allowed even though they target the same system roots the policy says it refuses. Fix: parse shell tokens or broaden the destructive-root checks to accept long options/options before and after the command target, including GNU `--no-preserve-root`. Related code: `src/shared/commandPolicy.js:15-16`, `src/shared/commandPolicy.js:27-28`, `src/shared/commandPolicy.js:44-50`.
 
 ### `src/shared/contextPrune.js`
 
@@ -969,7 +969,8 @@ Use this section to scan the codebase batch by batch. For each file, add finding
 
 **Bugs / notes:**
 
-- TBD
+- **MEDIUM — ripgrep backend bypasses `.xkaliberignore` filtering.** `grepProject` prefers `grepWithRg` whenever `rg` is installed, but that path never loads `.xkaliberignore` and never filters returned paths with `isIgnored`; only the Node fallback does. Files that `globFiles`, `list_project`, and the fallback grep hide can therefore be surfaced by the default grep path, including secrets or generated artifacts a project intentionally excluded. Fix: pass the ignore file to `rg` (or post-filter every hit with `isIgnored`) and preserve the same default/custom ignore semantics across both backends. Related code: `src/shared/grepTool.js:22-31`, `src/shared/grepTool.js:36-51`, `src/shared/grepTool.js:57-80`, `src/shared/ignoreFilter.js:10-24`.
+- **LOW — Code Mode grep ignores the model's glob filter.** The Code tool executor calls `grepProject(root, a.pattern, a.glob || '**/*')`, but `grepProject` expects an options object (`{ glob: ... }`). Because strings do not have `opts.glob`, `opts.caseInsensitive`, or `opts.maxHits`, the requested glob filter is silently dropped and the grep searches the whole project. Fix: pass `grepProject(root, a.pattern, { glob: a.glob || '**/*' })` and add a regression test for filtered Code Mode grep. Related code: `src/code/tools/executor.js:330-335`, `src/shared/grepTool.js:22-27`, `src/shared/grepTool.js:100-106`.
 
 ### `src/shared/ignoreFilter.js`
 
@@ -993,7 +994,7 @@ Use this section to scan the codebase batch by batch. For each file, add finding
 
 **Bugs / notes:**
 
-- TBD
+- **MEDIUM — `validatePublicFetchTarget` allows localhost/private-network SSRF targets.** The helper is documented as allowing arbitrary public HTTP(S) hosts while blocking internal pivots, but `isBlockedHost` only rejects metadata/link-local/ULA names. `validatePublicFetchTarget` therefore accepts loopback and RFC1918/private hosts such as `127.0.0.1`, `10.0.0.5`, and numeric/hex loopback forms that Node normalizes to localhost (`http://2130706433/`, `http://0x7f000001/`). Agent `fetch_url`, plugin net access, and plugin installs can be pointed at local admin panels or intranet services. Fix: parse/resolve host addresses and reject loopback, private, link-local, multicast, and IPv4-mapped internal IPv6 ranges unless a caller explicitly opts into local access. Related code: `src/shared/netGuard.js:20-27`, `src/shared/netGuard.js:60-65`, `src/main/ipc/agent.js:337-343`, `src/main/services/pluginManager.js:326-393`, `src/main/services/pluginInstaller.js:55-56`, `src/main/services/pluginInstaller.js:116-119`.
 
 ### `src/shared/pathPolicy.js`
 
