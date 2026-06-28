@@ -55,6 +55,27 @@ function stripJsCommentsAndStrings(js) {
             while (i < s.length && s[i] !== q) { if (s[i] === '\\') i++; i++; }
             i++; out += '""'; continue;
         }
+        if (c === '`') {
+            // Template literal: drop the literal TEXT (so e.g. `GAME OVER` isn't read as
+            // constants) but KEEP the `${...}` interpolation expressions so the identifiers
+            // inside them are still scanned.
+            i++;
+            while (i < s.length && s[i] !== '`') {
+                if (s[i] === '\\') { i += 2; continue; }
+                if (s[i] === '$' && s[i + 1] === '{') {
+                    out += ' '; i += 2;
+                    let depth = 1;
+                    while (i < s.length && depth > 0) {
+                        if (s[i] === '{') depth++;
+                        else if (s[i] === '}') { depth--; if (depth === 0) { i++; break; } }
+                        out += s[i]; i++;
+                    }
+                    out += ' '; continue;
+                }
+                i++; // drop one char of literal text
+            }
+            i++; out += '``'; continue;
+        }
         out += c; i++;
     }
     return out;
@@ -261,6 +282,16 @@ function findUndefinedConstants(js) {
     for (const m of s.matchAll(new RegExp(`\\b(${ID})\\s*=(?!=)`, 'g'))) declared.add(m[1]);
     // object keys / case labels / enum members:  NAME:
     for (const m of s.matchAll(new RegExp(`\\b(${ID})\\s*:`, 'g'))) declared.add(m[1]);
+    // function / arrow parameters:  function f(WIDTH, HEIGHT){}  /  (WIDTH, HEIGHT) =>  /  WIDTH =>
+    const addParams = (list) => {
+        for (const part of String(list).split(',')) {
+            const mm = part.trim().match(new RegExp(`^(?:\\.\\.\\.)?(${ID})`));
+            if (mm) declared.add(mm[1]);
+        }
+    };
+    for (const m of s.matchAll(/\bfunction\b[\w$\s*]*\(([^)]*)\)/g)) addParams(m[1]);
+    for (const m of s.matchAll(/\(([^()]*)\)\s*=>/g)) addParams(m[1]);
+    for (const m of s.matchAll(new RegExp(`(?:^|[^.\\w$])(${ID})\\s*=>`, 'g'))) declared.add(m[1]);
 
     // used as a BARE identifier (not preceded by '.', so not a member access)
     const used = new Set();
@@ -452,6 +483,40 @@ function validateRenderedClassesStyled({ cssClasses, appliedClasses, htmlClasses
  * file is corrupt regardless of whether braces happen to balance. Cheap, near-zero false
  * positives, runs on any text file.
  */
+/** Blank out strings, template literals, comments, and regex literals so a structural
+ *  scan doesn't trip on legitimate content (e.g. a regex `/^\{.*\}$/`). */
+function blankLiteralsAndRegex(src) {
+    const s = String(src || '');
+    let out = '', i = 0, prev = '';
+    const regexCanFollow = (p) => p === '' || '([{,;:=!&|?'.includes(p);
+    while (i < s.length) {
+        const c = s[i], n = s[i + 1];
+        if (c === '/' && n === '/') { while (i < s.length && s[i] !== '\n') i++; out += ' '; continue; }
+        if (c === '/' && n === '*') { i += 2; while (i < s.length && !(s[i] === '*' && s[i + 1] === '/')) i++; i += 2; out += ' '; continue; }
+        if (c === '"' || c === "'" || c === '`') {
+            const q = c; i++;
+            while (i < s.length && s[i] !== q) { if (s[i] === '\\') i++; i++; }
+            i++; out += '""'; prev = '"'; continue;
+        }
+        if (c === '/' && regexCanFollow(prev)) {
+            let j = i + 1, inClass = false, closed = false;
+            while (j < s.length) {
+                const ch = s[j];
+                if (ch === '\\') { j += 2; continue; }
+                if (ch === '\n') break;
+                if (ch === '[') inClass = true;
+                else if (ch === ']') inClass = false;
+                else if (ch === '/' && !inClass) { j++; closed = true; break; }
+                j++;
+            }
+            if (closed) { while (j < s.length && /[a-z]/i.test(s[j])) j++; i = j; out += ' '; prev = ')'; continue; }
+        }
+        if (!/\s/.test(c)) prev = c;
+        out += c; i++;
+    }
+    return out;
+}
+
 function detectSerializationArtifacts(text) {
     const issues = [];
     const s = String(text || '');
@@ -461,8 +526,10 @@ function detectSerializationArtifacts(text) {
     if (keyLeak) {
         issues.push({ level: 'error', code: 'leaked-toolcall', message: `file contains a leaked tool-call fragment (\`${keyLeak[0].trim()}…\`) — the write captured part of its own JSON envelope` });
     }
-    // Backslash immediately before a brace — a JSON over-escape artifact, never valid source.
-    if (/\\[{}]/.test(s)) {
+    // Backslash-escaped brace OUTSIDE strings/regex/comments — a JSON over-escape artifact,
+    // never valid in real code structure. Scrub literals first so a valid regex like
+    // /^\{.*\}$/ or a string "\{" is not mistaken for corruption.
+    if (/\\[{}]/.test(blankLiteralsAndRegex(s))) {
         issues.push({ level: 'error', code: 'escaped-brace', message: 'file contains a backslash-escaped brace (`\\{` or `\\}`) — a JSON-escaping artifact that is not valid source' });
     }
     return issues;

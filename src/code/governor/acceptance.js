@@ -82,47 +82,48 @@ function gameAcceptanceChecks({ html, js }) {
     const hasJs = (re) => re.test(J);
 
     const checks = [];
-    const add = (id, label, present, detail) => checks.push({ id, label, required: true, present: !!present, detail: detail || '' });
+    const add = (id, label, present, required, detail) => checks.push({ id, label, required: !!required, present: !!present, detail: detail || '' });
 
-    // Visible game area: a board/canvas/maze/grid container in HTML or created in JS.
+    // REQUIRED (universal across game types — only these BLOCK). They distinguish a real,
+    // interactive build from a static title screen, without assuming a specific genre:
+    //   1) it responds to input, and 2) it changes the screen (DOM, canvas, or a loop).
+    add('input', 'responds to input',
+        hasJs(/addEventListener\s*\(\s*['"](keydown|keyup|keypress|click|dblclick|mousedown|mouseup|mousemove|pointerdown|pointermove|pointerup|touchstart|touchmove|wheel)['"]/i) ||
+        hasJs(/\b(?:window|document|canvas|body)?\.?on(keydown|keyup|keypress|click|mousedown|mousemove|pointerdown|touchstart)\s*=/i),
+        true, 'keyboard/mouse/touch listener');
+
+    add('dynamic', 'changes the screen (DOM / canvas / loop)',
+        hasJs(/\.(innerHTML|textContent|innerText|value)\s*=/i) ||
+        hasJs(/\.(appendChild|append|prepend|insertAdjacentHTML|replaceChildren|removeChild|remove|setAttribute|insertBefore)\s*\(/i) ||
+        hasJs(/createElement\s*\(/i) ||
+        hasJs(/\.style\b|\.classList\b/i) ||
+        hasJs(/getContext\s*\(|\b(fillRect|clearRect|strokeRect|fillText|drawImage|beginPath|arc|lineTo|moveTo|putImageData)\s*\(/i) ||
+        hasJs(/\b(setInterval|requestAnimationFrame|setTimeout)\s*\(/),
+        true, 'DOM/canvas/loop drives visible change');
+
+    // DIAGNOSTIC ONLY (not required) — common patterns, surfaced for context but never blocking,
+    // because plenty of valid games lack a "player" element, a score, or an explicit end state.
     add('game-area', 'visible game area',
         /<canvas[\s>]/i.test(H) ||
         /id=["'][^"']*(board|game|maze|grid|canvas|stage|arena|playfield)[^"']*["']/i.test(H) ||
         /class=["'][^"']*(board|game|maze|grid|canvas|stage|arena|playfield)[^"']*["']/i.test(H) ||
         /getElementById\(['"][^'"]*(board|game|maze|grid|canvas|stage)[^'"]*['"]\)/i.test(J),
-        'board/canvas/maze container');
+        false, 'board/canvas/maze container');
 
-    // Player element renders.
-    add('player', 'player element renders',
+    add('player', 'player element',
         has(/\b(pacman|pac-?man|player|hero|paddle|snake|ship|bird|character|avatar)\b/i),
-        'player class/element present');
+        false, 'player class/element present');
 
-    // Input handler.
-    add('input', 'input handler exists',
-        hasJs(/addEventListener\s*\(\s*['"](keydown|keyup|keypress|click|mousedown|mouseup|pointerdown|touchstart)['"]/i) ||
-        hasJs(/\bon(keydown|keyup|keypress|click|mousedown|pointerdown|touchstart)\s*=/i),
-        'keyboard/mouse/touch listener');
-
-    // Score updates: a score value mutated AND written to the DOM (or a score element).
     const scoreMutated = hasJs(/\bscore\b\s*(\+\+|--|\+=|-=|=)/i) || hasJs(/\bscore\s*=\s*score\b/i);
     const scoreShown = hasJs(/score[A-Za-z]*\.(textContent|innerText|innerHTML)\s*=/i) ||
         hasJs(/\.(textContent|innerText|innerHTML)\s*=\s*[`'"][^`'"]*\$?\{?\s*score/i) ||
         /id=["'][^"']*score[^"']*["']/i.test(H);
-    add('score', 'score updates',
-        scoreMutated && scoreShown,
-        'score variable mutated and rendered');
+    add('score', 'score updates', scoreMutated && scoreShown, false, 'score variable mutated and rendered');
 
-    // Game loop / movement.
-    add('loop', 'game loop or movement exists',
-        hasJs(/\b(setInterval|requestAnimationFrame|setTimeout)\s*\(/) ||
-        hasJs(/function\s+(gameLoop|update|tick|move|step|render)\b/i),
-        'interval/raf/loop function');
-
-    // Win / lose / completion state.
     add('endstate', 'win/lose or completion state',
         has(/\b(you\s*win|game\s*over|you\s*lose|win|won|lose|lost|defeat|victory|caught|complete[d]?)\b/i) ||
         hasJs(/clearInterval\s*\(/),
-        'win/lose/end text or stop condition');
+        false, 'win/lose/end text or stop condition');
 
     return checks;
 }

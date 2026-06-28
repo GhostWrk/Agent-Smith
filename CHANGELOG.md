@@ -1,5 +1,21 @@
 # Agent Smith Changelog
 
+## [46.20.0] - 2026-06-28 — Code Mode builds ANYTHING (gate no longer false-blocks correct code)
+
+Code Mode only. An aggressive audit found the completion gate was overfit to web/CRUD apps and false-BLOCKED correct code — a normal keyboard game produced 6 bogus blockers and could never pass. Fixed so Code Mode accepts correct projects of any kind (games, generic web apps, scripts, CLIs, libraries) while still catching genuinely broken output.
+
+### Fixed (false-blocks on correct code)
+- **Smoke test** (`smokeTest.js`): the vm sandbox now provides the standard browser globals (`window.addEventListener`/`removeEventListener`/`dispatchEvent`, `navigator`, `location`, `performance`, `fetch`, `matchMedia`, `getComputedStyle`, `Audio`/`Image`, `Event`/`KeyboardEvent`/`MouseEvent`, storage, typed arrays, etc.) so standard idioms don't throw a false `[SMOKE]` failure. It also now fires deferred `DOMContentLoaded`/`load`/`window.onload` init once, like a browser — exercising (not breaking) apps that wire up on load. Still catches real load-time throws and undefined references.
+- **Undefined-constant check** (`webValidators.js`): the scrubber now strips template-literal TEXT (keeping `${…}` expressions), so UPPERCASE words in strings like `\`GAME OVER\`` are no longer mis-flagged as undeclared constants; UPPERCASE function parameters are recognized as declared. Real undeclared constants are still caught.
+- **Serialization-artifact check** (`webValidators.js`): the escaped-brace heuristic now scrubs strings/regex/comments first, so a valid regex like `/^\{.*\}$/` is no longer flagged; genuine JSON over-escape is still caught.
+- **Game acceptance** (`acceptance.js`): now requires only the universal signals (responds to input + changes the screen via DOM/canvas/loop). Genre-specific tropes (a "player" element, a score, an explicit win/lose state) are diagnostics, not blockers — so any kind of correct game passes, while an empty title-screen shell still fails.
+
+### Changed (de-hardcoded guidance)
+- The "no files written" and "blocked build" gate messages are no longer web-only; they describe the task's actual files (web app, script, CLI, library, service) and only mention CSS-selector/page-load advice when the failures are actually web-related. Non-web projects (no index.html) already skip the entire web validation layer and pass on syntax + content + required-artifact + project-command checks.
+
+Verified: the exact keyboard game that produced 6 false blockers now passes; a Python CLI passes; smoke still fails a real ReferenceError; suite 560/560 (+7 build-anything tests), harness-eval 10/10, harness-security 6/6.
+
+
 ## [46.19.3] - 2026-06-28 — Regression test: auto-tune fires on startup
 
 ### Tests

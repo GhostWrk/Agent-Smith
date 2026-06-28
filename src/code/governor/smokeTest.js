@@ -124,6 +124,7 @@ function makeStubDom(htmlIds) {
     const body = StubEl('body');
     const documentEl = StubEl('html');
     const head = StubEl('head');
+    const docListeners = {};
 
     const document = {
         // Return a stub for any id (cached) so `getElementById('x').foo()` never throws a
@@ -139,12 +140,13 @@ function makeStubDom(htmlIds) {
         createElement(tag) { const el = StubEl(tag); created.push(el); return el; },
         createTextNode(t) { return { textContent: String(t) }; },
         createDocumentFragment() { return StubEl('fragment'); },
-        addEventListener() {}, removeEventListener() {},
+        addEventListener(type, cb) { if (typeof cb === 'function') (docListeners[type] = docListeners[type] || []).push(cb); },
+        removeEventListener() {}, dispatchEvent() { return true; },
         body, head, documentElement: documentEl,
         readyState: 'complete'
     };
 
-    return { document, body, created, classesApplied, registry, StubEl };
+    return { document, body, created, classesApplied, registry, StubEl, docListeners };
 }
 
 function runVmEngine(sources, html) {
@@ -156,11 +158,23 @@ function runVmEngine(sources, html) {
     const dom = makeStubDom(ids);
     const timers = [];
     const capturedConsole = [];
+    const winListeners = {};
+
+    // A permissive Event/KeyboardEvent/etc. object — enough that `new Event('x')`,
+    // `e.preventDefault()`, `e.key` etc. don't throw during load.
+    const makeEvt = (type, init) => Object.assign({
+        type: type || '', key: '', code: '', keyCode: 0, which: 0, button: 0,
+        clientX: 0, clientY: 0, deltaY: 0, touches: [], target: null, currentTarget: null,
+        bubbles: false, defaultPrevented: false,
+        preventDefault() {}, stopPropagation() {}, stopImmediatePropagation() {}
+    }, init || {});
+    const EvtCtor = function (type, init) { return makeEvt(type, init); };
+    const mediaQuery = () => ({ matches: false, media: '', addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {}, dispatchEvent() { return true; } });
 
     const sandbox = {
         document: dom.document,
         console: {
-            log() {}, info() {}, debug() {},
+            log() {}, info() {}, debug() {}, trace() {}, group() {}, groupEnd() {}, table() {}, dir() {}, assert() {}, count() {}, time() {}, timeEnd() {},
             warn(...a) { capturedConsole.push(['warn', a.join(' ')]); },
             error(...a) { capturedConsole.push(['error', a.join(' ')]); }
         },
@@ -168,14 +182,53 @@ function runVmEngine(sources, html) {
         setTimeout(fn) { timers.push(fn); return timers.length; },
         requestAnimationFrame(fn) { timers.push(fn); return timers.length; },
         clearInterval() {}, clearTimeout() {}, cancelAnimationFrame() {},
+        queueMicrotask(fn) { try { fn(); } catch (e) { /* surfaced elsewhere */ } },
         alert() {}, confirm() { return true; }, prompt() { return null; },
-        localStorage: { getItem() { return null; }, setItem() {}, removeItem() {}, clear() {} },
-        Math, Date, JSON, parseInt, parseFloat, isNaN, isFinite,
-        Array, Object, String, Number, Boolean, Map, Set, Symbol, Promise, RegExp, Error
+        // window-level event wiring (window === sandbox below, so `window.addEventListener` works too)
+        addEventListener(type, cb) { if (typeof cb === 'function') (winListeners[type] = winListeners[type] || []).push(cb); },
+        removeEventListener() {}, dispatchEvent() { return true; },
+        // storage
+        localStorage: { getItem() { return null; }, setItem() {}, removeItem() {}, clear() {}, key() { return null; }, length: 0 },
+        sessionStorage: { getItem() { return null; }, setItem() {}, removeItem() {}, clear() {}, key() { return null; }, length: 0 },
+        // common browser globals so standard idioms don't throw on load (this is a smoke test
+        // for "does it run", not a real browser — these are inert stubs)
+        navigator: { userAgent: 'agent-smith-smoke', language: 'en-US', languages: ['en-US'], platform: 'linux', onLine: true, maxTouchPoints: 0, hardwareConcurrency: 4, clipboard: { writeText() { return Promise.resolve(); }, readText() { return Promise.resolve(''); } }, vibrate() {}, geolocation: { getCurrentPosition() {}, watchPosition() {} }, mediaDevices: { getUserMedia() { return Promise.resolve({}); } }, serviceWorker: { register() { return Promise.resolve({}); } } },
+        location: { href: 'file:///index.html', protocol: 'file:', host: '', hostname: '', port: '', pathname: '/index.html', search: '', hash: '', origin: 'file://', reload() {}, assign() {}, replace() {}, toString() { return 'file:///index.html'; } },
+        history: { length: 1, state: null, pushState() {}, replaceState() {}, back() {}, forward() {}, go() {} },
+        performance: { now() { return 0; }, mark() {}, measure() {}, getEntriesByType() { return []; }, timing: {} },
+        screen: { width: 1280, height: 720, availWidth: 1280, availHeight: 720, colorDepth: 24, orientation: { type: 'landscape-primary', angle: 0, addEventListener() {} } },
+        devicePixelRatio: 1, innerWidth: 1280, innerHeight: 720, outerWidth: 1280, outerHeight: 720, scrollX: 0, scrollY: 0, pageXOffset: 0, pageYOffset: 0,
+        scrollTo() {}, scrollBy() {}, focus() {}, blur() {}, open() { return null; }, close() {}, print() {}, getSelection() { return { toString() { return ''; }, removeAllRanges() {} }; },
+        getComputedStyle() { return { getPropertyValue() { return ''; } }; },
+        matchMedia() { return mediaQuery(); },
+        fetch() { return Promise.resolve({ ok: true, status: 200, statusText: 'OK', headers: { get() { return null; } }, json() { return Promise.resolve({}); }, text() { return Promise.resolve(''); }, blob() { return Promise.resolve({}); }, arrayBuffer() { return Promise.resolve(new ArrayBuffer(0)); } }); },
+        XMLHttpRequest: function () { return { open() {}, send() {}, setRequestHeader() {}, addEventListener() {}, abort() {}, readyState: 0, status: 0, responseText: '' }; },
+        WebSocket: function () { return { send() {}, close() {}, addEventListener() {} }; },
+        // constructors commonly used at load time
+        Event: EvtCtor, CustomEvent: EvtCtor, KeyboardEvent: EvtCtor, MouseEvent: EvtCtor, PointerEvent: EvtCtor, TouchEvent: EvtCtor, WheelEvent: EvtCtor, InputEvent: EvtCtor, FocusEvent: EvtCtor, DragEvent: EvtCtor,
+        Audio: function () { return { play() { return Promise.resolve(); }, pause() {}, load() {}, addEventListener() {}, removeEventListener() {}, currentTime: 0, duration: 0, volume: 1, loop: false, muted: false, paused: true, src: '' }; },
+        Image: function () { return { addEventListener() {}, removeEventListener() {}, width: 0, height: 0, naturalWidth: 0, naturalHeight: 0, complete: true, src: '', onload: null, onerror: null }; },
+        AudioContext: function () { return new Proxy({ currentTime: 0, destination: {}, state: 'running' }, { get(t, p) { return p in t ? t[p] : () => ({ connect() {}, start() {}, stop() {}, gain: { value: 1, setValueAtTime() {} }, frequency: { value: 0, setValueAtTime() {} }, type: 'sine' }); } }); },
+        FileReader: function () { return { readAsText() {}, readAsDataURL() {}, addEventListener() {}, result: null, onload: null }; },
+        Blob: function () { return {}; }, FormData: function () { return { append() {}, get() { return null; }, getAll() { return []; }, has() { return false; }, set() {}, entries() { return []; } }; },
+        URL: typeof URL !== 'undefined' ? URL : function () { return { toString() { return ''; } }; },
+        URLSearchParams: typeof URLSearchParams !== 'undefined' ? URLSearchParams : function () { return { get() { return null; }, getAll() { return []; }, has() { return false; }, append() {}, set() {}, toString() { return ''; } }; },
+        TextEncoder: typeof TextEncoder !== 'undefined' ? TextEncoder : function () { return { encode() { return new Uint8Array(); } }; },
+        TextDecoder: typeof TextDecoder !== 'undefined' ? TextDecoder : function () { return { decode() { return ''; } }; },
+        structuredClone: typeof structuredClone !== 'undefined' ? structuredClone : (v) => JSON.parse(JSON.stringify(v == null ? null : v)),
+        atob: (s) => Buffer.from(String(s), 'base64').toString('binary'),
+        btoa: (s) => Buffer.from(String(s), 'binary').toString('base64'),
+        Math, Date, JSON, parseInt, parseFloat, isNaN, isFinite, encodeURIComponent, decodeURIComponent, encodeURI, decodeURI,
+        Array, Object, String, Number, Boolean, Map, Set, WeakMap, WeakSet, Symbol, Promise, RegExp, Error, Proxy, Reflect,
+        Int8Array, Uint8Array, Uint8ClampedArray, Int16Array, Uint16Array, Int32Array, Uint32Array, Float32Array, Float64Array, ArrayBuffer, DataView,
+        Intl: typeof Intl !== 'undefined' ? Intl : undefined
     };
     sandbox.window = sandbox;
     sandbox.globalThis = sandbox;
     sandbox.self = sandbox;
+    sandbox.top = sandbox;
+    sandbox.parent = sandbox;
+    sandbox.frames = sandbox;
     vm.createContext(sandbox);
 
     for (const src of sources) {
@@ -186,6 +239,19 @@ function runVmEngine(sources, html) {
             errors.push(`${src.ref}: ${e.name}: ${e.message}`);
         }
     }
+
+    // Fire deferred init once (DOMContentLoaded / load / window.onload), like a browser,
+    // so apps that wire everything in a load handler are actually exercised. Bounded.
+    const fireList = (cbs, type) => {
+        for (const cb of (cbs || []).slice(0, 20)) {
+            try { cb(makeEvt(type)); } catch (e) { errors.push(`${type} handler: ${e.name}: ${e.message}`); }
+        }
+    };
+    for (const type of ['DOMContentLoaded', 'load']) {
+        fireList(winListeners[type], type);
+        fireList(dom.docListeners[type], type);
+    }
+    if (typeof sandbox.onload === 'function') { try { sandbox.onload(makeEvt('load')); } catch (e) { errors.push(`window.onload: ${e.name}: ${e.message}`); } }
 
     // Exercise the game loop once to surface runtime throws (bounded).
     let fired = 0;

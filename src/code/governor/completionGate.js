@@ -441,7 +441,7 @@ async function checkCompletion(projectRoot, filesTouched, goal, opts = {}) {
                 checked: 0,
                 messages: [
                     'No project files were created or modified yet. You must use tools — do not reply with text only.',
-                    'For a new web app: write_file index.html, style.css, and script.js (or patch existing files).',
+                    'Create the files your task needs with write_file (or patch to edit existing files): for a web app that is typically index.html plus the CSS/JS it links; for a script, CLI, library, or service it is the source/module files the task describes.',
                     'Call write_file or patch now; list_project is optional because the bootstrap includes the tree.'
                 ],
                 status: 'incomplete',
@@ -583,8 +583,10 @@ function formatGateMessage(result, goal, projectRoot) {
             msgs.some(m => /^\[(DOM|ARTIFACT|FUNCTIONAL)\]/.test(m))
                 ? 'Repair required: apply the SMALLEST patch that resolves each item above — rename the selector/control in index.html OR script.js so they match (not both), or create the missing file. Do NOT re-explore or rewrite from scratch; make the targeted edits now with patch.'
                 : 'Use read_file to inspect broken files. Use patch or write_file to fix them.',
-            'All files must parse, every referenced file must exist, CSS selectors must match the classes/ids',
-            'used in JS/HTML, constants must match map/array dimensions, and the page must load without errors.'
+            ...(msgs.some(m => /^\[(WEB|SELECTOR|DOM|HTML|CSS|SMOKE|RUNTIME|UNDEF|DATA|ACCEPT|FUNCTIONAL)\]/.test(m))
+                ? ['All files must parse, every referenced file must exist, CSS selectors must match the classes/ids',
+                    'used in JS/HTML, constants must match map/array dimensions, and the page must load without errors.']
+                : ['Every file must parse and the program must run without errors.'])
         ];
     return lines.join('\n');
 }
