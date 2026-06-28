@@ -547,13 +547,13 @@ Use this section to scan the codebase batch by batch. For each file, add finding
 
 **Bugs / notes:**
 
-- TBD
+- **LOW — `actions-clear` can erase the Agent Mode audit trail without a scoped confirmation or undo.** The action log is the documented trust layer for Agent Mode, but the IPC handler exposes `actions-clear` as a one-shot call to `log.clear()`, which irreversibly removes every recorded action and its undo metadata. The web permission policy gates `actions-*` behind tool permission, but there is no per-call confirmation, session scoping, or preservation of reversible entries. A model/tool-capable user can therefore wipe the evidence/undo trail that makes Agent Mode reviewable. Fix: remove this channel from model-facing surfaces, require explicit user confirmation in UI, or archive/soft-delete entries while preserving undo data until a retention window expires. Related code: `src/main/ipc/actions.js:12-14`, `src/main/services/actionLog.js:84`.
 
 ### `src/main/ipc/agent.js`
 
 **Bugs / notes:**
 
-- TBD
+- **MEDIUM — Agent Mode directory deletes are marked reversible but only recreate an empty directory.** `agent-delete-file` logs an undo object for directories as `{ op:'delete', isDir:true }` after recursively deleting the directory with `fs.rm(..., { recursive:true, force:true })`. `actionLog.undo` handles that by only calling `fs.mkdirSync(u.path, { recursive:true })`, so `undo_action` reports success while all deleted child files remain lost. This undermines the advertised reversible trust layer for directory deletes outside/inside the project. Fix: either mark directory deletes audit-only/non-reversible unless a full tree snapshot is captured, or store/restore a bounded recursive snapshot. Related code: `src/main/ipc/agent.js:282-305`, `src/main/services/actionLog.js:70-72`.
 
 ### `src/main/ipc/auth.js`
 
@@ -565,7 +565,8 @@ Use this section to scan the codebase batch by batch. For each file, add finding
 
 **Bugs / notes:**
 
-- TBD
+- **LOW — background Code Mode command spawn failures can crash the main process.** Agent Mode background commands attach a child `error` handler, but Code Mode's equivalent `runBackgroundCommand` does not. If `spawnShell` fails asynchronously (missing shell, invalid cwd, OS error), the unhandled child `error` event can terminate the Electron main process instead of returning/logging a tool failure. Fix: mirror the Agent Mode handler by recording `[Process failed to start: ...]`, setting `running=false`, and returning a failed job result where possible. Related code: `src/main/ipc/code.js:105-120`; contrast `src/main/ipc/agent.js:138-144`.
+- **MEDIUM — Code Mode IPC drops isolation and milestone flags before starting runs.** The `code-run` handler reads `isolatedRun`, `parallelMilestones`, `milestoneWorktrees`, and `milestoneConcurrent` from renderer options and passes them into `startCodeTask`, but `startCodeTask` does not copy any of those flags into the `base` object sent to `runCodeTask`. As a result, toggling isolated runs or parallel/milestone worktrees in the UI has no effect on the main execution path; worktree isolation and subagent orchestration can silently stay disabled. Fix: propagate these booleans through `startCodeTask`'s `base`, and preserve them when resuming/approving plans where appropriate. Related code: `src/main/ipc/code.js:149-176`, `src/main/ipc/code.js:213-228`, `src/code/loop/runCodeTask.js:240-258`, `src/code/loop/runCodeTask.js:350-372`.
 
 ### `src/main/ipc/edit.js`
 
@@ -577,7 +578,7 @@ Use this section to scan the codebase batch by batch. For each file, add finding
 
 **Bugs / notes:**
 
-- TBD
+- **MEDIUM — `git-undo` can hard-reset unrelated user commits without confirmation or ownership checks.** The IPC handler exposes `git-undo` as a direct call to `gitIntegration.undoLast(projectContext.getRoot())`. The underlying implementation runs `git reset --hard HEAD~1` when a parent commit exists, with no check that the last commit was created by Agent Smith and no dirty-worktree guard. A tool-capable web/renderer caller can therefore discard the user's latest commit and uncommitted working tree changes, not just an Agent Smith checkpoint. Fix: record commit IDs created by Agent Smith and only undo those, refuse when the worktree is dirty unless explicitly confirmed, or use a non-destructive `git revert` flow. Related code: `src/main/ipc/git.js:23`, `src/shared/gitIntegration.js:47-55`.
 
 ### `src/main/ipc/history.js`
 
@@ -595,7 +596,7 @@ Use this section to scan the codebase batch by batch. For each file, add finding
 
 **Bugs / notes:**
 
-- TBD
+- **LOW — ledger IPC can throw when no plan/session id is available.** Both `ledger-diff` and `ledger-revert-all` fall back to `state.currentPlanId` when no explicit id is passed, then call `changeLedger.diff/revertAll` unconditionally. If there is no active plan/session, `state.currentPlanId` can be `null`/`undefined`; `ChangeLedger.getLedgerDir(planId)` then passes that value to `path.join`, which throws instead of returning a structured `{ error: 'No active plan' }`. Fix: validate `planId || state.currentPlanId` in the IPC handler before calling the ledger. Related code: `src/main/ipc/ledger.js:11-13`, `src/main/services/changeLedger.js:11-13`, `src/main/services/changeLedger.js:146-188`.
 
 ### `src/main/ipc/lmStudio.js`
 
@@ -607,7 +608,7 @@ Use this section to scan the codebase batch by batch. For each file, add finding
 
 **Bugs / notes:**
 
-- TBD
+- **MEDIUM — memory write/delete IPC is not gated by tool permission.** The shared web permission policy gates `agent-`, `code-`, `git-`, `edit-`, `plugin-`, `ledger-`, `preview-`, and `actions-` channels, but not `mem-*`. As a result, any authenticated web user with `canUseApp` can call `mem-store` to persist arbitrary text into cross-session memory and `mem-clear` to erase all vector memory, even when `canUseTools` is false. The tests only assert `mem-query` is read-only; the mutating memory channels are not distinguished. Fix: add `mem-store` and `mem-clear` (and possibly `mem-count` if memory metadata is sensitive) to `TOOL_CHANNELS` or introduce a dedicated memory permission. Related code: `src/main/ipc/memory.js:9-23`, `src/shared/channelPolicy.js:13-28`, `tests/securityPolicy.test.js:102-110`.
 
 ### `src/main/ipc/plugins.js`
 
@@ -631,7 +632,8 @@ Use this section to scan the codebase batch by batch. For each file, add finding
 
 **Bugs / notes:**
 
-- TBD
+- **MEDIUM — WhatsApp send IPC bypasses tool-permission gating.** `whatsapp-send` has a real-world side effect (sending a message) and is exposed as the Agent Mode `send_whatsapp_message` tool, but `whatsapp-*` channels are not included in `TOOL_PREFIXES` or `TOOL_CHANNELS`. Through `/api/invoke`, any authenticated user whose account can use the app can call `whatsapp-send` once WhatsApp is linked, even if `canUseTools` is false. Fix: gate `whatsapp-send` (and likely `whatsapp-init`/`whatsapp-cancel`) behind `canUseTools`, or add an explicit messaging permission/confirmation step. Related code: `src/main/lifecycle/whatsapp.js:134-139`, `src/renderer/modes/agentTools.js:449-451`, `src/shared/channelPolicy.js:13-28`.
+- **LOW — failed WhatsApp initialization leaves a stale client object that blocks retry.** `whatsapp-init` assigns `whatsappClient = new Client(...)` before `await whatsappClient.initialize()`. If initialization throws, the catch returns `{ error }` but does not destroy the client or reset `whatsappClient` to `null`. Subsequent `whatsapp-init` calls hit the early `if (whatsappClient) return { status:'already_init' }` path even though the client is not ready, and the failed headless browser/session may remain alive until cancellation or process exit. Fix: in the catch block, destroy the partially-created client and clear `whatsappClient` before returning the error. Related code: `src/main/lifecycle/whatsapp.js:69-83`, `src/main/lifecycle/whatsapp.js:116-121`.
 
 ### `src/main/server/previewRoutes.js`
 
