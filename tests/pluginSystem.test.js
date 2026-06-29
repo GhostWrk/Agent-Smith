@@ -115,15 +115,18 @@ test('manager: beforeToolCall hook fires and can veto', async () => {
     const pluginsDir = path.join(ud, 'plugins');
     writePlugin(pluginsDir, 'guard', {
         'plugin.json': JSON.stringify({ id: 'guard', name: 'Guard', version: '1.0.0', capabilities: [] }),
-        'hooks/veto.js': 'module.exports={event:"beforeToolCall",async run(p){return p.toolName==="danger"?{block:true,reason:"nope"}:undefined;}};',
+        // Key on the REAL fired payload field. The Agent loop and Code Mode executor fire
+        // beforeToolCall with { tool, name, args } — never `toolName` — so a hook keyed on
+        // `toolName` would never see the value in production (the batch-10 example-hook bug).
+        'hooks/veto.js': 'module.exports={event:"beforeToolCall",async run(p){return (p.tool||p.name)==="danger"?{block:true,reason:"nope"}:undefined;}};',
     });
     const pm = new PluginManager(ud, {});
     pm.discover();
     pm.setEnabled('guard', true, []);
 
-    const ok = await pm.fireHook('beforeToolCall', { toolName: 'write_file' });
+    const ok = await pm.fireHook('beforeToolCall', { tool: 'write_file', name: 'write_file', args: {} });
     assert.strictEqual(ok.blocked, false);
-    const blocked = await pm.fireHook('beforeToolCall', { toolName: 'danger' });
+    const blocked = await pm.fireHook('beforeToolCall', { tool: 'danger', name: 'danger', args: {} });
     assert.strictEqual(blocked.blocked, true);
     assert.strictEqual(blocked.reason, 'nope');
 });
@@ -231,14 +234,26 @@ test('manager._buildHost wires fs (sandboxed), net (guarded) and memory per gran
 
 // ---- installer: pure logic + guards -----------------------------------------
 
-test('installer: resolveGithubTarball maps repo + branch', () => {
+test('installer: resolveGithubTarball maps repo + branch and flags immutability', () => {
     const inst = new PluginInstaller('/tmp/plugins', { hasGit: false });
-    assert.strictEqual(
+    assert.deepStrictEqual(
         inst.resolveGithubTarball('https://github.com/owner/repo'),
-        'https://codeload.github.com/owner/repo/tar.gz/refs/heads/main');
-    assert.strictEqual(
+        { url: 'https://codeload.github.com/owner/repo/tar.gz/refs/heads/main', ref: 'main', immutable: false });
+    assert.deepStrictEqual(
         inst.resolveGithubTarball('https://github.com/owner/repo/tree/dev'),
-        'https://codeload.github.com/owner/repo/tar.gz/refs/heads/dev');
+        { url: 'https://codeload.github.com/owner/repo/tar.gz/refs/heads/dev', ref: 'dev', immutable: false });
+    // commit SHA is immutable
+    const sha = '0123456789abcdef0123456789abcdef01234567';
+    assert.deepStrictEqual(
+        inst.resolveGithubTarball(`https://github.com/owner/repo/tree/${sha}`),
+        { url: `https://codeload.github.com/owner/repo/tar.gz/${sha}`, ref: sha, immutable: true });
+    // tag is immutable
+    assert.deepStrictEqual(
+        inst.resolveGithubTarball('https://github.com/owner/repo/tree/v1.0.0/tags/v1.0.0'),
+        { url: 'https://codeload.github.com/owner/repo/tar.gz/refs/tags/v1.0.0', ref: 'v1.0.0', immutable: true });
+    assert.deepStrictEqual(
+        inst.resolveGithubTarball('https://github.com/owner/repo/releases/tag/v1.0.0'),
+        { url: 'https://codeload.github.com/owner/repo/tar.gz/refs/tags/v1.0.0', ref: 'v1.0.0', immutable: true });
     assert.strictEqual(inst.resolveGithubTarball('https://example.com/x'), null);
 });
 
@@ -279,9 +294,10 @@ test('installer: end-to-end with injected runners installs into plugins dir', as
             fs.cpSync(EXAMPLE, dest, { recursive: true });
         },
     });
-    const r = await inst.install('https://github.com/example/hello.git');
+    const r = await inst.install('https://github.com/example/hello.git', { allowMutable: true });
     assert.strictEqual(r.success, true);
     assert.strictEqual(r.id, 'hello');
+    assert.strictEqual(r.immutable, false, 'branch HEAD install recorded as mutable');
     assert.ok(fs.existsSync(path.join(pluginsDir, 'hello', 'plugin.json')), 'installed on disk');
 });
 
