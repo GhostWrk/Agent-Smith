@@ -79,7 +79,9 @@ function isInternalIPv4Num(n) {
  */
 function isInternalHost(host) {
     if (!host) return true;
-    const h = String(host).toLowerCase().replace(/^\[|\]$/g, '');
+    // Strip trailing dot (FQDN form, e.g. "localhost." → "localhost") so
+    // trailing-dot SSRF bypasses are blocked.
+    const h = String(host).toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
     if (isLoopbackHost(h) || isBlockedHost(h)) return true;
     if (h.includes(':')) { // IPv6
         if (h === '::1' || h === '::') return true;

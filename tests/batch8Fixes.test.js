@@ -25,6 +25,9 @@ test('commandPolicy blocks long-option variants of destructive-root commands', (
         'chown --recursive root /',
         'sudo rm --no-preserve-root -rf /',
         'cd /tmp && rm --recursive --force ~',
+        'rm -rf ${HOME}/',
+        '/bin/rm --recursive --force /',
+        '/usr/bin/rm -rf /',
     ];
     for (const c of blocked) {
         assert.equal(assessCommand(c).allowed, false, `should block: ${c}`);
@@ -60,6 +63,8 @@ test('validatePublicFetchTarget rejects loopback and private-network targets', (
         'http://[::1]/',
         'http://[::ffff:127.0.0.1]/',
         'http://100.64.0.1/',        // CGNAT
+        'http://localhost./',        // trailing-dot SSRF bypass
+        'http://metadata.google.internal./',  // trailing-dot metadata endpoint
     ];
     for (const u of blocked) {
         assert.equal(validatePublicFetchTarget(u), null, `should reject: ${u}`);

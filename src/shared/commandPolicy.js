@@ -17,13 +17,19 @@ const path = require('path');
 
 // Root-ish destruction targets. Tokens are compared after stripping surrounding
 // quotes and lowercasing so `'/'`, `"/"`, and `$HOME` all normalize here.
-const ROOT_TARGETS = new Set(['/', '/.', '/*', '~', '~/', '$home', '${home}', '$env:userprofile']);
+const ROOT_TARGETS = new Set(['/', '/.', '/*', '~', '~/', '$home', '${home}', '${home}/', '$env:userprofile']);
 
 function stripQuotes(tok) {
     return tok.replace(/^['"]+|['"]+$/g, '');
 }
 function isRootTarget(tok) {
-    return ROOT_TARGETS.has(stripQuotes(tok).toLowerCase());
+    let t = stripQuotes(tok).toLowerCase();
+    if (ROOT_TARGETS.has(t)) return true;
+    // Also match trailing-slash variants: ${HOME}/ → ${home}, ~/ stays
+    if (t.endsWith('/') && t !== '/' && t !== '~/') {
+        return ROOT_TARGETS.has(t.slice(0, -1)) || ROOT_TARGETS.has(t);
+    }
+    return ROOT_TARGETS.has(t);
 }
 function isOption(tok) {
     return tok.startsWith('-');
@@ -44,7 +50,7 @@ function commandSegments(cmd) {
 // `--no-preserve-root`) appearing before or after the target. This replaces the
 // position-sensitive regexes that GNU long options could slip past.
 function recursiveRootCommand(cmd, name) {
-    const nameRe = new RegExp(`^${name}$`, 'i');
+    const nameRe = new RegExp(`(^|[/\\\\])${name}$`, 'i');
     for (const seg of commandSegments(cmd)) {
         const toks = seg.trim().split(/\s+/).filter(Boolean);
         const idx = toks.findIndex(t => nameRe.test(t));
