@@ -58,7 +58,7 @@ function generateId() {
 class PipelineTrace {
     constructor(run_id = null, parent_run_id = null, request_id = null) {
         this.schema_version = '1.0';
-        this.run_id = run_id ? assertSafeRunId(run_id) : generateId();
+        this.run_id = (run_id == null) ? generateId() : assertSafeRunId(run_id);
         this.parent_run_id = parent_run_id;
         this.request_id = request_id;
         this.started_at = new Date().toISOString();
