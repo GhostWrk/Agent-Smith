@@ -152,6 +152,9 @@ async function handleCompletionReflection(ctx, session, planArtifacts, execDeps,
             || missingCount < (snap.missingRefs ?? missingCount)
         );
         session._reflectSnap = { files: fileCount, issues: issueCount, missingRefs: missingCount };
+        // Remember the EXACT validator failures (incl. [FUNCTIONAL]/[SMOKE]/[RUNTIME], which the
+        // lightweight per-turn scan can't see) so the no-write escalation can list them verbatim.
+        session._lastGateMessages = gate.messages || [];
         if (madeProgress) session.completionReflections = 0;
 
         if (gate.missingRefs?.length) {
@@ -498,8 +501,9 @@ async function runTurnLoop(ctx) {
 
         // No-progress backstop: stop early if the run keeps taking turns (e.g. read-only
         // exploration) without ever writing a file, instead of burning all 40 turns.
+        const prevTurnWrote = !!session._turnHadEdit;
         const progressCheck = earlyStop.onProgress(new Set(session.filesTouched || []).size, {
-            hadEdit: !!session._turnHadEdit
+            hadEdit: prevTurnWrote
         });
         session._turnHadEdit = false;
         if (progressCheck.stop) {
@@ -552,9 +556,36 @@ async function runTurnLoop(ctx) {
                 ].join('\n')
             });
         }
-        // NOTE: DOM repair does NOT force write-only — the model needs read_file to find the
-        // exact patch text in script.js. The repair nudge + the index.html-rewrite block guide it.
-        const writeOnly = writeOnlyEmpty || writeOnlyPartial;
+        // ESCALATION: validation is still failing and the PREVIOUS turn wrote NOTHING (the model
+        // read / "I'll continue" instead of patching). Stop asking nicely — inject a forceful
+        // edit-now instruction listing the EXACT unresolved validator failures, force the implement
+        // phase, and after a second no-write turn drop reads so the next reply MUST be a patch.
+        // Trigger on the FRESH per-turn blockers (so it can't fire on stale failures after a fix);
+        // list the fuller detail (incl. the [FUNCTIONAL]/[SMOKE]/[RUNTIME] from the last gate run).
+        const freshBlockers = preBlockers.messages;
+        const detailFailures = [...new Set([...freshBlockers, ...(session._lastGateMessages || [])])];
+        let forceWriteRepair = false;
+        if (freshBlockers.length && !prevTurnWrote && session.turn > 1) {
+            session._noWriteRepairTurns = (session._noWriteRepairTurns || 0) + 1;
+            session.phase = 'implement';
+            forceWriteRepair = (session._noWriteRepairTurns >= 2);
+            session.messages.push({
+                role: 'system',
+                content: [
+                    '[HARNESS — STOP. EDIT FILES NOW]',
+                    'You did not edit any file last turn and the build still FAILS validation. Do NOT restate the plan, do NOT say you will continue, do NOT just read or inspect.',
+                    'Apply the SMALLEST patch to fix these EXACT validator failures (rename the wrong id/selector to one that exists in the HTML, or create/fill the missing file):',
+                    ...detailFailures.slice(0, 10).map(m => '  ' + m),
+                    'Your NEXT reply MUST be a write_file or patch tool call and nothing else.'
+                ].join('\n')
+            });
+        } else if (prevTurnWrote) {
+            session._noWriteRepairTurns = 0;
+        }
+        // NOTE: DOM repair does NOT normally force write-only (the model needs read_file to find the
+        // exact patch text). But after two no-write repair turns we drop reads to break the loop —
+        // the model rewrites the file from the exact ids the repair instruction names.
+        const writeOnly = writeOnlyEmpty || writeOnlyPartial || forceWriteRepair;
         const tools = selectToolsForTurn({
             userPrompt: userPrompt || session.goal,
             turnIndex: session.turn - 1,

@@ -137,3 +137,22 @@ test('a stalled Pac-Man repair turn falls back to harness recovery and completes
     assert.equal(session.status, 'done');
     assert.ok(events.some(e => e.type === 'harness_scaffold' && e.reason === 'acceptance_repair'));
 });
+
+test('a no-write repair turn while validation fails injects a forceful EDIT-NOW escalation', async () => {
+    // index.html has #import-input; script.js calls getElementById('file-input') (null deref).
+    // The model keeps "verifying" (no tool calls) — the harness must escalate to "edit files now".
+    const root = tmp('exit-escalate-');
+    fs.writeFileSync(path.join(root, 'index.html'),
+        '<!doctype html><html><body><input id="import-input"><script src="script.js"></script></body></html>');
+    fs.writeFileSync(path.join(root, 'script.js'),
+        "document.getElementById('file-input').addEventListener('change', () => {});");
+    const session = mkSession({ projectRoot: root, goal: 'Build a web page with a file import input', filesTouched: ['index.html', 'script.js'] });
+    const { ctx } = ctxFor(session, async () => ({ message: { role: 'assistant', content: "I'll verify the current state and continue." }, finishReason: 'stop' }), { maxTurns: 6 });
+    await runTurnLoop(ctx);
+
+    const escalation = session.messages.find(m => typeof m.content === 'string' && /STOP\. EDIT FILES NOW/.test(m.content));
+    assert.ok(escalation, 'a forceful edit-now escalation was injected after a no-write repair turn');
+    assert.match(escalation.content, /file-input|FAILS validation/, 'it names the exact validator failure');
+    assert.match(escalation.content, /write_file or patch/, 'it demands a tool call, not more reading');
+    fs.rmSync(root, { recursive: true, force: true });
+});

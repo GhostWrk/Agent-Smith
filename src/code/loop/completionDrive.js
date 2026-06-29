@@ -64,16 +64,21 @@ function buildWriteMessages(session, rel) {
     ];
 }
 
-function buildRepairMessages(session, scriptRel, domMsgs) {
+function buildRepairMessages(session, scriptRel, errMsgs) {
     const script = readSafe(session.projectRoot, scriptRel).slice(0, 8000);
+    const indexRel = (session.filesTouched || []).find(f => /index\.html$/i.test(f))
+        || (fs.existsSync(path.join(session.projectRoot, 'index.html')) ? 'index.html' : null);
+    const html = indexRel ? readSafe(session.projectRoot, indexRel).slice(0, 3000) : '';
     return [
         { role: 'system', content: FOCUS_SYSTEM },
         {
             role: 'user', content:
                 `Goal: ${session.goal}\n\n` +
-                `${scriptRel} references element ids that index.html does not define. Fix ONLY ${scriptRel} so every getElementById/querySelector id matches the HTML (do NOT change the HTML).\n` +
-                `Problems:\n${domMsgs.slice(0, 12).join('\n')}\n\n` +
-                `Reply with ONE write_file tool call: path="${scriptRel}" containing the corrected COMPLETE file.\n\nCurrent ${scriptRel}:\n\`\`\`js\n${script}\n\`\`\``
+                `${scriptRel} fails validation. Fix ONLY ${scriptRel} (do NOT change the HTML) so these EXACT errors are resolved — every getElementById/querySelector id MUST match an id that actually exists in index.html:\n` +
+                `${errMsgs.slice(0, 12).join('\n')}\n\n` +
+                `Reply with ONE write_file tool call: path="${scriptRel}" containing the corrected COMPLETE file.` +
+                (html ? `\n\nindex.html (the ids you must match):\n\`\`\`html\n${html}\n\`\`\`` : '') +
+                `\n\nCurrent ${scriptRel}:\n\`\`\`js\n${script}\n\`\`\``
         }
     ];
 }
@@ -132,12 +137,14 @@ async function driveToCompletion(deps) {
             if (emit) emit({ type: 'run_continue', reason: 'finish_missing_file', target: missing, turn: session.turn });
             progressed = await focusedWrite(deps, session, buildWriteMessages(session, missing), missing);
         } else {
-            // 2) Otherwise a DOM id mismatch — repair the script so its ids match the HTML.
-            const domMsgs = messages.filter(m => /^\[DOM\]/i.test(m));
+            // 2) Otherwise a script-level failure — a DOM id mismatch, an uncaught runtime error
+            //    (e.g. addEventListener on null), a failing smoke test, or an undefined reference.
+            //    Repair the script so its ids match the HTML and it runs clean.
+            const repairMsgs = messages.filter(m => /^\[(DOM|FUNCTIONAL|RUNTIME|SMOKE|UNDEF|SELECTOR)\]/i.test(m));
             const scriptRel = (session.filesTouched || []).find(f => /\.(js|mjs|cjs)$/i.test(f));
-            if (domMsgs.length && scriptRel) {
+            if (repairMsgs.length && scriptRel) {
                 if (emit) emit({ type: 'run_continue', reason: 'finish_repair', target: scriptRel, turn: session.turn });
-                progressed = await focusedWrite(deps, session, buildRepairMessages(session, scriptRel, domMsgs), scriptRel);
+                progressed = await focusedWrite(deps, session, buildRepairMessages(session, scriptRel, repairMsgs), scriptRel);
             }
         }
         if (!progressed) break; // can't produce the focused piece — stop (don't loop pointlessly)

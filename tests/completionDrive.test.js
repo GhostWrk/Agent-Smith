@@ -101,6 +101,36 @@ test('driveToCompletion finishes the stuck-at-verify case: empty README + DOM id
     fs.rmSync(root, { recursive: true, force: true });
 });
 
+test('REGRESSION: drive repairs a null-addEventListener from a wrong DOM id (#file-input -> #import-input)', async () => {
+    // index.html only has #import-input; script.js calls getElementById('file-input') -> null ->
+    // "Cannot read properties of null (reading 'addEventListener')". Code Mode must patch the JS.
+    const root = mkproj({
+        'index.html': '<!doctype html><html><body><input id="import-input"><script src="script.js"></script></body></html>',
+        'script.js': "document.getElementById('file-input').addEventListener('change', () => { document.body.textContent = 'imported'; });"
+    });
+    const session = { projectRoot: root, goal: 'Build a web page with a file import input', model: 'm', codeTemperature: 0.2, filesTouched: ['index.html', 'script.js'] };
+    const stream = async ({ messages }) => {
+        if (/path=\\"script\.js\\"/.test(JSON.stringify(messages))) {
+            // the focused repair prompt carries index.html, so the model can use the real id
+            return writeReply('script.js', "document.getElementById('import-input').addEventListener('change', () => { document.body.textContent = 'imported'; });");
+        }
+        return { message: { role: 'assistant', content: '', tool_calls: [] } };
+    };
+    const runTool = async (name, args) => { fs.writeFileSync(path.join(root, args.path), args.content, 'utf8'); return { relPath: args.path }; };
+
+    const res = await driveToCompletion({
+        session, runValidation, gateOpts: { grindMode: false },
+        stream, apiBaseUrl: 'x', writeTools: [{ type: 'function', function: { name: 'write_file', parameters: {} } }],
+        signal: null, emit: () => {}, runTool, maxCycles: 6
+    });
+
+    const js = fs.readFileSync(path.join(root, 'script.js'), 'utf8');
+    assert.match(js, /import-input/, 'script.js patched to the real id');
+    assert.doesNotMatch(js, /file-input/, "the wrong id 'file-input' is gone");
+    assert.equal(res.completed, true, 'validation passes after the repair; remaining: ' + (res.gate.messages || []).join(' | '));
+    fs.rmSync(root, { recursive: true, force: true });
+});
+
 test('driveToCompletion is a no-op when the build is already complete', async () => {
     const root = mkproj({
         'index.html': '<!doctype html><html><body><div id="app"></div><script src="script.js"></script></body></html>',

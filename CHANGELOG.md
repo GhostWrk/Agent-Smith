@@ -1,5 +1,22 @@
 # Agent Smith Changelog
 
+## [46.26.0] - 2026-06-29 — Code Mode: convert validator failures into targeted repairs (no more no-write loops)
+
+Code Mode only — Agent and Chat mode unchanged.
+
+Code Mode could get stuck in "I'll continue / let me inspect" loops when verification reported concrete failures (e.g. script.js references #file-input but the HTML only has #import-input -> "Cannot read properties of null (reading 'addEventListener')"), reading files for many turns without applying the tiny patch, then stopping as INCOMPLETE on "No files written in 12 turns".
+
+### Added
+- **No-write repair escalation** (`turnLoop.js`): when validation is still failing and the PREVIOUS turn wrote NOTHING, the harness now injects a forceful, high-priority instruction listing the EXACT unresolved validator failures — "STOP. EDIT FILES NOW. Do not restate the plan, do not say you will continue, do not just read. Apply the smallest patch to fix these exact failures. Your next reply MUST be a write_file/patch." After a second consecutive no-write repair turn it also drops read tools so the next reply must be an edit. The exact failures (including [FUNCTIONAL]/[SMOKE]/[RUNTIME], which the per-turn scan can't see) are captured from the last gate run.
+
+### Changed
+- **Continuation drive** (`completionDrive.js`) now repairs the script on ANY script-level validator failure — DOM id mismatch, uncaught runtime error (addEventListener on null), failing smoke test, undefined reference, selector mismatch — not just [DOM]. The focused repair prompt now includes index.html so the model can match every id to one that actually exists.
+
+Unchanged guarantees: success is still only reported when all linked files exist and validation passes; the gate is never disabled; an unresolvable run still ends with the exact unresolved errors.
+
+Tests: +tests/completionDrive.test.js "drive repairs a null-addEventListener from a wrong DOM id (#file-input -> #import-input)"; +tests/harnessExitPaths.test.js "a no-write repair turn while validation fails injects a forceful EDIT-NOW escalation". Suite 577/577, harness-eval 10/10, harness-security 6/6. Agent/Chat mode files untouched.
+
+
 ## [46.25.0] - 2026-06-29 — Code Mode: finish what it started (continuation drive + stuck-at-verify fixes)
 
 Code Mode only. Targets the real-world failure where Code Mode wrote some files, then stalled or looped at the verify step and ended INCOMPLETE (e.g. "wrote index.html, never wrote script.js" / "stuck at step 5 with DOM id mismatches and an empty README").
