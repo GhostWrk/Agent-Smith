@@ -21,15 +21,9 @@ function extractNamedArtifacts(goal) {
     return [...found];
 }
 
+const { fileExistsDeep } = require('./fileScan.js');
 function artifactOnDisk(projectRoot, name) {
-    try {
-        if (fs.existsSync(path.join(projectRoot, name))) return true;
-        for (const e of fs.readdirSync(projectRoot, { withFileTypes: true })) {
-            if (e.isDirectory() && !e.name.startsWith('.') && e.name !== 'node_modules'
-                && fs.existsSync(path.join(projectRoot, e.name, name))) return true;
-        }
-    } catch (e) { /* ignore */ }
-    return false;
+    return fileExistsDeep(projectRoot, name, 4);
 }
 
 /**

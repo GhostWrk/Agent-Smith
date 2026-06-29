@@ -60,7 +60,7 @@ test('max-turns exit still runs the gate and sets a status (never silently done)
     let streamCalled = 0;
     const { ctx, events } = ctxFor(session, async () => { streamCalled++; return noToolReply(); }, { maxTurns: 1 });
     await runTurnLoop(ctx);
-    assert.equal(streamCalled, 0, 'maxTurns=1 trips before any model call');
+    assert.equal(streamCalled, 1, 'maxTurns=1 runs exactly one turn, then max-turns trips');
     assert.ok(['unverified', 'incomplete'].includes(session.status));
     assert.ok(events.some(e => e.type === 'final_summary'), 'final_summary must be emitted');
 });

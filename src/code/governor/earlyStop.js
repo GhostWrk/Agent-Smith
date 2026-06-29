@@ -22,10 +22,12 @@ class EarlyStopDetector {
     }
 
     onTurn() {
-        this.turn++;
+        // Check before incrementing so exactly maxTurns turns execute (the message advertises
+        // maxTurns; the old pre-increment stopped one turn early).
         if (this.turn >= this.maxTurns) {
             return { stop: true, reason: `Max turns (${this.maxTurns}) reached` };
         }
+        this.turn++;
         return { stop: false };
     }
 

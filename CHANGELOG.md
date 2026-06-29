@@ -1,5 +1,18 @@
 # Agent Smith Changelog
 
+## [46.24.0] - 2026-06-28 — Code Mode: nested deliverables, content-aware artifacts, exact turn budget, listener cleanup
+
+Code Mode only. The remaining low-severity audit items.
+
+### Fixed
+- **Nested deliverables** (`fileScan.js` + gate/partialBuild/planStepAutoAdvance): required-artifact existence, index.html discovery, and the partial-build / plan-step scans only looked at the project root + one level, so a deliverable at e.g. `src/js/app.js` or `apps/web/index.html` was wrongly reported missing (a false `[ARTIFACT]` block / spurious nudge). They now search a few levels deep (breadth-first, shallowest match wins) while skipping vendor/build dirs.
+- **Content-aware required artifacts** (`completionGate.artifactExists`): a prompt-named deliverable that exists but is **0 bytes** is no longer accepted as done — it must be non-empty (with an allowlist for legitimately-empty files like `.gitkeep` / `__init__.py`).
+- **Exact turn budget** (`earlyStop.onTurn`): the max-turns check ran one turn early (advertised 40, executed 39). It now executes exactly `maxTurns` turns.
+- **Abort-listener cleanup** (`streamCompletion`): the per-request abort listener on the shared run signal was never removed on normal completion, accumulating across turns (MaxListenersExceededWarning + retained closures). It is now removed when the request settles.
+
+Verified: +tests/fileScanArtifacts.test.js (3) and updated turn-budget tests. Suite 571/571, harness-eval 10/10, harness-security 6/6.
+
+
 ## [46.23.1] - 2026-06-28 — Code Mode: pin the containment root for every run
 
 ### Fixed

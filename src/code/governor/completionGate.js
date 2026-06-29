@@ -21,6 +21,7 @@ const { detectPartialDeliverableState } = require('../context/partialBuild.js');
 const { parseDomGateItems } = require('../context/htmlContract.js');
 const { normalizeWebProject } = require('./webModuleNormalize.js');
 const { pickNextMissing } = require('../loop/missingRefGuard.js');
+const { findFileDeep, findIndexHtmlDeep } = require('../context/fileScan.js');
 
 const { isNonTrivialTask } = require('../context/planArtifacts.js');
 
@@ -156,11 +157,7 @@ const SCAN_IGNORE = new Set(['node_modules', 'dist', 'build', '.git', '.agentsmi
 
 function findProjectIndexHtml(projectRoot) {
     try {
-        if (fs.existsSync(path.join(projectRoot, 'index.html'))) return 'index.html';
-        for (const e of fs.readdirSync(projectRoot, { withFileTypes: true })) {
-            if (!e.isDirectory() || e.name.startsWith('.') || SCAN_IGNORE.has(e.name)) continue;
-            if (fs.existsSync(path.join(projectRoot, e.name, 'index.html'))) return `${e.name}/index.html`;
-        }
+        return findIndexHtmlDeep(projectRoot, 4);
     } catch (e) { /* ignore */ }
     return null;
 }
@@ -174,21 +171,22 @@ function extractRequiredArtifacts(goal) {
     return [...found];
 }
 
-/** True if a file with this basename exists (touched, at root, or in an immediate subdir). */
+// Files that are legitimately empty (so existence, not content, is enough).
+const EMPTY_OK = /(?:^|\/)(?:\.gitkeep|__init__\.py|py\.typed|\.nojekyll|\.gitignore)$/i;
+
+/** True if a NON-EMPTY file with this basename exists (touched, or anywhere a few levels deep).
+ *  A required deliverable that is 0 bytes is not "done". */
 function artifactExists(projectRoot, name, files) {
     const base = name.toLowerCase();
-    if ((files || []).some(f => {
-        const l = String(f).toLowerCase().replace(/\\/g, '/');
-        return l === base || l.endsWith('/' + base);
-    })) return true;
+    const rel = findFileDeep(projectRoot, name, 4)
+        || (files || []).map(f => String(f).replace(/\\/g, '/'))
+            .find(f => f.toLowerCase() === base || f.toLowerCase().endsWith('/' + base));
+    if (!rel) return false;
+    if (EMPTY_OK.test(name)) return true;
     try {
-        if (fs.existsSync(path.join(projectRoot, name))) return true;
-        for (const e of fs.readdirSync(projectRoot, { withFileTypes: true })) {
-            if (e.isDirectory() && !e.name.startsWith('.') && !SCAN_IGNORE.has(e.name)
-                && fs.existsSync(path.join(projectRoot, e.name, name))) return true;
-        }
-    } catch (e) { /* ignore */ }
-    return false;
+        const abs = path.join(projectRoot, rel);
+        return fs.existsSync(abs) && fs.readFileSync(abs, 'utf8').trim().length > 0;
+    } catch (e) { return false; }
 }
 
 async function runValidation(projectRoot, filesTouched, goal, opts = {}) {

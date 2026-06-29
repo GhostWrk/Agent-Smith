@@ -8,20 +8,11 @@ const fs = require('fs');
 const path = require('path');
 const wv = require('../governor/webValidators.js');
 const { advanceStep, currentStep } = require('./codePlan.js');
+const { fileExistsDeep } = require('../context/fileScan.js');
 
 function fileExists(projectRoot, name) {
     if (!projectRoot || !name) return false;
-    const direct = path.join(projectRoot, name);
-    if (fs.existsSync(direct)) return true;
-    try {
-        for (const e of fs.readdirSync(projectRoot, { withFileTypes: true })) {
-            if (e.isDirectory() && !e.name.startsWith('.') && e.name !== 'node_modules'
-                && fs.existsSync(path.join(projectRoot, e.name, name))) {
-                return true;
-            }
-        }
-    } catch (e) { /* ignore */ }
-    return false;
+    return fileExistsDeep(projectRoot, name, 4);
 }
 
 function readHtml(projectRoot) {

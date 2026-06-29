@@ -24,16 +24,16 @@ test('fitBudget evicts accumulated system nudges to stay under target', () => {
 });
 
 test('EarlyStopDetector max-turns is durable across resume (seeds from initialTurn)', () => {
-    // simulate a session resumed at turn 38 with a 40-turn budget
-    const det = new EarlyStopDetector({ maxTurns: 40, initialTurn: 38 });
-    assert.equal(det.onTurn().stop, false, 'turn 39 still runs');
-    assert.equal(det.onTurn().stop, true, 'turn 40 stops — budget NOT reset by resume');
+    // simulate a session resumed at turn 39 with a 40-turn budget: one more turn runs, then stop.
+    const det = new EarlyStopDetector({ maxTurns: 40, initialTurn: 39 });
+    assert.equal(det.onTurn().stop, false, 'the 40th turn still runs');
+    assert.equal(det.onTurn().stop, true, 'past 40 stops — budget NOT reset by resume');
 
-    // a fresh run still gets the full budget
+    // a fresh run executes exactly maxTurns turns, then stops on the next call.
     const fresh = new EarlyStopDetector({ maxTurns: 40 });
-    let stops = 0;
-    for (let i = 0; i < 45; i++) if (fresh.onTurn().stop) { stops = i + 1; break; }
-    assert.ok(stops >= 39 && stops <= 40, `fresh run uses the full budget (stopped at ${stops})`);
+    let ran = 0;
+    for (let i = 0; i < 45; i++) { if (fresh.onTurn().stop) break; ran++; }
+    assert.equal(ran, 40, `fresh run executes exactly maxTurns (ran ${ran})`);
 });
 
 test('CodeSession.toJSON persists isolation fields for worktree cleanup on resume', () => {

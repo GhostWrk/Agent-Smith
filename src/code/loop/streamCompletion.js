@@ -73,11 +73,15 @@ async function streamCompletion({
         let hardTimer = null;
         let idleTimer = null;
         let settled = false;
+        let onAbort = null;
         const finish = (fn, value) => {
             if (settled) return;
             settled = true;
             clearTimeout(hardTimer);
             clearTimeout(idleTimer);
+            // Remove the abort listener so it doesn't accumulate on the shared (per-run) signal
+            // across every turn (MaxListenersExceededWarning + retained closures otherwise).
+            if (signal && onAbort) { try { signal.removeEventListener('abort', onAbort); } catch (e) { /* ignore */ } }
             fn(value);
         };
         const armIdleTimer = (req, ms = inactivityTimeoutMs) => {
@@ -209,10 +213,11 @@ async function streamCompletion({
                 req.destroy();
                 return finish(reject, new Error('Aborted'));
             }
-            signal.addEventListener('abort', () => {
+            onAbort = () => {
                 req.destroy();
                 finish(reject, new Error('Aborted'));
-            }, { once: true });
+            };
+            signal.addEventListener('abort', onAbort, { once: true });
         }
         req.write(payload);
         req.end();
