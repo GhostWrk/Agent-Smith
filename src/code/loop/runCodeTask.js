@@ -418,6 +418,7 @@ async function runCodeTask(opts) {
             });
             if (session.isolatedRun && session.worktreePath && !session.milestoneWorktrees) {
                 cleanupWorktree(session.parentProjectRoot || projectRoot, sessionId);
+                try { projectContext.setRoot(parentProjectRoot); } catch (e) { /* non-fatal */ }
             }
             if (opts.pluginManager?.fireHook) {
                 try {
@@ -434,25 +435,42 @@ async function runCodeTask(opts) {
         }
     }
 
-    return executeTurnLoop({
-        session,
-        planAnchor,
-        planArtifacts,
-        earlyStop,
-        qualityMonitor,
-        trace,
-        userDataPath,
-        buildExecDeps,
-        execDeps: opts.execDeps,
-        emit,
-        signal,
-        apiBaseUrl,
-        pluginToolSchemas: opts.pluginToolSchemas,
-        pluginToolNames: opts.pluginToolNames,
-        streamCompletion: opts.streamCompletion,
-        memory: opts.memory,
-        pluginManager: opts.pluginManager
-    });
+    try {
+        return await executeTurnLoop({
+            session,
+            planAnchor,
+            planArtifacts,
+            earlyStop,
+            qualityMonitor,
+            trace,
+            userDataPath,
+            buildExecDeps,
+            execDeps: opts.execDeps,
+            emit,
+            signal,
+            apiBaseUrl,
+            pluginToolSchemas: opts.pluginToolSchemas,
+            pluginToolNames: opts.pluginToolNames,
+            streamCompletion: opts.streamCompletion,
+            memory: opts.memory,
+            pluginManager: opts.pluginManager,
+            projectRoot: parentProjectRoot
+        });
+    } finally {
+        if (session.isolatedRun && session.worktreePath && !session.milestoneWorktrees) {
+            // Sync touched files from the worktree back to the parent checkout before
+            // deleting the worktree — otherwise generated files are lost permanently.
+            try {
+                const { syncWorktreeFiles } = require('../../main/services/worktreeManager.js');
+                const touched = session.filesTouched || [];
+                if (touched.length) {
+                    syncWorktreeFiles(parentProjectRoot, session.worktreePath, touched);
+                }
+            } catch (e) { /* non-fatal */ }
+            try { cleanupWorktree(parentProjectRoot, sessionId); } catch (e) { /* non-fatal */ }
+            try { projectContext.setRoot(parentProjectRoot); } catch (e) { /* non-fatal */ }
+        }
+    }
 }
 
 module.exports = { runCodeTask, executeTurnLoop, newSessionId };
