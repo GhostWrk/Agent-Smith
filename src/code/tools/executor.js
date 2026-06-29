@@ -335,7 +335,7 @@ async function executeTool(name, args, deps) {
         }
         case 'grep': {
             const root = projectContext.getRoot();
-            const r = await grepProject(root, a.pattern, a.glob || '**/*');
+            const r = await grepProject(root, a.pattern, { glob: a.glob || '**/*' });
             if (r.error) return r;
             const hits = (r.hits || []).slice(0, 50);
             return { hits: hits.map(h => ({ file: h.file, line: h.line, text: h.text })), truncated: (r.hits || []).length > 50 };

@@ -27,6 +27,86 @@ function isBlockedHost(host) {
     return false;
 }
 
+/**
+ * Parse a host into a 32-bit IPv4 number if it denotes one in any inet_aton form:
+ * dotted-quad (`127.0.0.1`), bare integer (`2130706433`), hex (`0x7f000001`), octal,
+ * or short dotted forms (`127.1`). Returns null for anything that isn't an IPv4 literal
+ * (e.g. real hostnames). Mirrors how Node/glibc coerce these before connecting.
+ */
+function parseIPv4(host) {
+    const parts = String(host).split('.');
+    if (parts.length === 0 || parts.length > 4) return null;
+    const vals = [];
+    for (const p of parts) {
+        if (p === '') return null;
+        let n;
+        if (/^0x[0-9a-f]+$/i.test(p)) n = parseInt(p, 16);
+        else if (/^0[0-7]+$/.test(p)) n = parseInt(p, 8);
+        else if (/^(?:0|[1-9]\d*)$/.test(p)) n = parseInt(p, 10);
+        else return null;
+        if (!Number.isInteger(n) || n < 0) return null;
+        vals.push(n);
+    }
+    const last = vals[vals.length - 1];
+    const lead = vals.slice(0, -1);
+    if (lead.some(v => v > 255)) return null;
+    if (last >= Math.pow(256, 4 - lead.length)) return null;
+    let num = last;
+    for (let i = 0; i < lead.length; i++) num += lead[i] * Math.pow(256, 3 - i);
+    return num >>> 0;
+}
+
+function isInternalIPv4Num(n) {
+    const a = (n >>> 24) & 255;
+    const b = (n >>> 16) & 255;
+    if (a === 0) return true;                          // 0.0.0.0/8 ("this" network)
+    if (a === 10) return true;                         // 10.0.0.0/8 private
+    if (a === 127) return true;                        // 127.0.0.0/8 loopback
+    if (a === 169 && b === 254) return true;           // 169.254.0.0/16 link-local
+    if (a === 172 && b >= 16 && b <= 31) return true;  // 172.16.0.0/12 private
+    if (a === 192 && b === 168) return true;           // 192.168.0.0/16 private
+    if (a === 100 && b >= 64 && b <= 127) return true; // 100.64.0.0/10 CGNAT
+    if (a >= 224) return true;                          // 224.0.0.0/4 multicast + 240/4 reserved
+    return false;
+}
+
+/**
+ * True when a host points back at the local machine or a private/internal network —
+ * including loopback names, RFC1918/CGNAT/link-local/multicast ranges, and the numeric,
+ * hex, octal and IPv4-mapped-IPv6 encodings that normalize to those. Real public
+ * hostnames return false. Note: this inspects the literal host only and does NOT resolve
+ * DNS, so a public name that resolves to a private IP (DNS rebinding) is out of scope.
+ */
+function isInternalHost(host) {
+    if (!host) return true;
+    const h = String(host).toLowerCase().replace(/^\[|\]$/g, '');
+    if (isLoopbackHost(h) || isBlockedHost(h)) return true;
+    if (h.includes(':')) { // IPv6
+        if (h === '::1' || h === '::') return true;
+        // IPv4-mapped (::ffff:a.b.c.d), which Node may normalize to hex (::ffff:7f00:1).
+        const mapped = h.match(/^::ffff:(.+)$/);
+        if (mapped) {
+            const tail = mapped[1];
+            let n = null;
+            if (/^\d+\.\d+\.\d+\.\d+$/.test(tail)) {
+                n = parseIPv4(tail);
+            } else {
+                const g = tail.split(':');
+                if (g.length === 2 && g.every(x => /^[0-9a-f]{1,4}$/.test(x))) {
+                    n = (((parseInt(g[0], 16) << 16) >>> 0) | parseInt(g[1], 16)) >>> 0;
+                }
+            }
+            if (n !== null && isInternalIPv4Num(n)) return true;
+        }
+        if (h.startsWith('fe80') || h.startsWith('fc') || h.startsWith('fd')) return true; // link-local / ULA
+        if (h.startsWith('ff')) return true; // multicast
+        return false;
+    }
+    const n = parseIPv4(h);
+    if (n !== null) return isInternalIPv4Num(n);
+    return false;
+}
+
 function normOrigin(u) {
     let host = u.hostname.toLowerCase();
     if (host === 'localhost') host = '127.0.0.1';
@@ -54,14 +134,17 @@ function validateProxyTarget(targetUrl, lmsHostUrl) {
  * Validate a target for an OUTBOUND fetch (plugin `net` capability, plugin
  * installer downloads). Unlike validateProxyTarget this intentionally allows
  * arbitrary PUBLIC https/http hosts — plugins legitimately reach the internet —
- * but still refuses cloud-metadata, link-local and ULA hosts so the app can't be
- * used to pivot at those. Returns the parsed URL or null.
+ * but refuses any host that points back at the local machine or a private/internal
+ * network (loopback, RFC1918, link-local, CGNAT, multicast, cloud-metadata) so the
+ * app can't be used as an SSRF pivot at intranet services or local admin panels.
+ * Numeric/hex/octal and IPv4-mapped-IPv6 loopback encodings are covered too.
+ * Returns the parsed URL or null.
  */
 function validatePublicFetchTarget(targetUrl) {
     let u;
     try { u = new URL(targetUrl); } catch (e) { return null; }
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
-    if (isBlockedHost(u.hostname)) return null;
+    if (isInternalHost(u.hostname)) return null;
     return u;
 }
 
@@ -123,6 +206,7 @@ function normalizeLlmBaseUrl(base) {
 module.exports = {
     isLoopbackHost,
     isBlockedHost,
+    isInternalHost,
     normOrigin,
     normalizeLlmBaseUrl,
     validateProxyTarget,
