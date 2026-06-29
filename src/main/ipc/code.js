@@ -96,15 +96,15 @@ module.exports = function registerCodeIpc(ipcMain, deps) {
             runForegroundCommand: (command, cwd) => new Promise((resolve) => {
                 const FG_TIMEOUT_MS = 300000;
                 const cfg = projectContext.getShellConfig();
-                if (projectContext.isWindows()) {
-                    exec(command, { cwd, timeout: FG_TIMEOUT_MS, shell: cfg.shell }, (error, stdout, stderr) => {
-                        resolve({ error: error ? error.message : null, stdout: stdout || '', stderr: stderr || '' });
-                    });
-                } else {
-                    exec(command, { cwd, timeout: FG_TIMEOUT_MS }, (error, stdout, stderr) => {
-                        resolve({ error: error ? error.message : null, stdout: stdout || '', stderr: stderr || '' });
-                    });
-                }
+                // Bind to the active run's abort signal so stopping the run also kills an
+                // in-flight command instead of waiting out its timeout.
+                const signal = activeRun?.controller?.signal;
+                const opts = projectContext.isWindows()
+                    ? { cwd, timeout: FG_TIMEOUT_MS, shell: cfg.shell, signal }
+                    : { cwd, timeout: FG_TIMEOUT_MS, signal };
+                exec(command, opts, (error, stdout, stderr) => {
+                    resolve({ error: error ? error.message : null, stdout: stdout || '', stderr: stderr || '' });
+                });
             }),
             runBackgroundCommand: (command, cwd) => {
                 const jobId = nextJobId++;

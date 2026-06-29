@@ -1,5 +1,13 @@
 # Agent Smith Changelog
 
+## [46.24.1] - 2026-06-28 — Code Mode: stopping a run cancels an in-flight command
+
+### Fixed
+- Stopping a run now aborts an in-flight `run_command` immediately instead of waiting out its timeout. `runForegroundCommand` binds the active run's abort signal to the spawned process (Node's exec `signal` option), so `code-stop` / a parent abort kills the child at once. Confirmed: a long command is terminated ~300ms after stop rather than running for its full duration.
+
+This completes the aggressive-audit fix pass (v46.20.0–v46.24.1): all critical, high, medium, and low findings are resolved or verified non-issues. Suite 571/571, harness-eval 10/10, harness-security 6/6.
+
+
 ## [46.24.0] - 2026-06-28 — Code Mode: nested deliverables, content-aware artifacts, exact turn budget, listener cleanup
 
 Code Mode only. The remaining low-severity audit items.
