@@ -47,6 +47,9 @@ function goalWantsPreview(goal) {
 /** Bootstrap / gate nudge when building a new web deliverable. Model chooses the layout. */
 function buildNewArtifactBlock(goal, projectRoot) {
     if (!goalImpliesNewArtifacts(goal)) return '';
+    const { projectTypeProfile } = require('../plan/projectType.js');
+    const profile = projectTypeProfile(goal);
+    const webish = ['static_web_app', 'game', 'electron_app'].includes(profile.type);
     const isAppRepo = detectAppRepo(projectRoot);
     const lines = ['', '[NEW DELIVERABLE]'];
     if (isAppRepo) {
@@ -55,16 +58,17 @@ function buildNewArtifactBlock(goal, projectRoot) {
             'Create your deliverable as self-contained files in a NEW subfolder of your choice (name it for the task).'
         );
     } else {
-        lines.push(
-            'Create the files your task needs. For a static web app that is typically an index.html plus a linked style.css and script.js — choose whatever structure fits the task.'
-        );
+        lines.push(`This is a ${profile.label}. Create: ${profile.files} — choose whatever structure fits the task.`);
+        if (!webish) lines.push('Do NOT create index.html/style.css/script.js — this is not a web UI.');
     }
-    lines.push(
-        'Link CSS/JS from the HTML with paths relative to the HTML (same-folder files link as href="style.css" / src="script.js"). '
-            + 'CSS class names must match JS classList usage; use backticks for JS template literals.'
-    );
-    if (goalWantsPreview(goal)) {
-        lines.push('After the files exist and load cleanly, call show_preview on your index.html.');
+    if (webish) {
+        lines.push(
+            'Link CSS/JS from the HTML with paths relative to the HTML (same-folder files link as href="style.css" / src="script.js"). '
+                + 'CSS class names must match JS classList usage; use backticks for JS template literals.'
+        );
+        if (goalWantsPreview(goal)) {
+            lines.push('After the files exist and load cleanly, call show_preview on your index.html.');
+        }
     }
     lines.push('Start with write_file now.');
     return lines.join('\n');
@@ -77,19 +81,24 @@ function goalIsGame(goal) {
 
 /** Urgent system nudge after the completion gate blocks with zero writes. */
 function buildWriteNudge(goal, projectRoot) {
-    const preview = goalWantsPreview(goal) ? ' Then call show_preview on your index.html.' : '';
-    const jsDesc = goalIsGame(goal)
-        ? 'the complete game (state, input, loop, win/lose)'
-        : 'the complete app logic (state, event handlers, rendering, and persistence if the task needs it)';
+    const { projectTypeProfile } = require('../plan/projectType.js');
+    const profile = projectTypeProfile(goal);
+    const webish = ['static_web_app', 'game', 'electron_app'].includes(profile.type);
     const where = detectAppRepo(projectRoot)
         ? 'Put them in a NEW subfolder of your choice — do NOT touch the host root index.html.'
         : 'Use whatever paths fit the task.';
-    return [
+    const lines = [
         '[HARNESS — WRITE REQUIRED]',
         'You stopped without creating any files. Respond with write_file tool calls ONLY (no prose).',
-        `Create the files your task needs — for a static web app that is an index.html plus the CSS and JS it links (${jsDesc}). ${where}`,
-        'Link each asset from the HTML with a relative path, and create every linked file before stopping.' + preview
-    ].join('\n');
+        `This is a ${profile.label}. Create: ${profile.files}. ${where}`
+    ];
+    if (webish) {
+        const preview = goalWantsPreview(goal) ? ' Then call show_preview on your index.html.' : '';
+        lines.push('Link each asset from the HTML with a relative path, and create every linked file before stopping.' + preview);
+    } else {
+        lines.push('Do NOT create index.html/style.css/script.js — this is not a web UI. Create every file the task needs before stopping.');
+    }
+    return lines.join('\n');
 }
 
 /** Urgent nudge when HTML exists but linked CSS/JS files are missing. */

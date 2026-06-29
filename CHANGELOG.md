@@ -1,5 +1,24 @@
 # Agent Smith Changelog
 
+## [46.29.0] - 2026-06-29 — Code Mode: project-type router (stop defaulting every build to a web page)
+
+Code Mode only — Agent and Chat mode unchanged; validation is not weakened.
+
+Code Mode defaulted almost every build to index.html/style.css/script.js — even "a simple AI harness" became a button + DOM demo. Root cause: the PLANNING prompt's only example was a web app ("For a new web app use milestones like: index.html, style.css, script.js…"), so the planner scaffolded a web page for anything.
+
+### Added
+- **Project-type router** (`src/code/plan/projectType.js`): `classifyProjectType(goal)` classifies the request into static_web_app, node_cli, python_cli, node_library, python_package, api_server, electron_app, test_harness, game, automation_script, existing_repo_patch, or unknown — BEFORE planning. A web scaffold is only chosen when the user clearly asks for a web/browser UI (or names a conventional UI app like a to-do/tracker); "harness/CLI/script/tool/runner/tester/benchmark/automation" route to a non-web implementation. `projectTypeProfile(goal)` returns the type's label, appropriate files, ordered plan steps, and verification.
+
+### Changed
+- **Planning prompt** (`planningPhase.js`): built per-request from the classified type — names the files appropriate to that artifact and, for non-web types, explicitly forbids index.html/style.css/script.js. Ambiguous requests pick the most likely type (a script/CLI, not a web page) and state the assumption.
+- **Default plan** (`codePlan.defaultPlan`): produces type-appropriate file steps (e.g. main.py + argparse + pytest for a Python CLI; package.json + runner + sample config for a Node harness). Web/game keep their existing milestones.
+- **"Create files" nudges** (`artifactHints` buildWriteNudge/buildNewArtifactBlock): describe the classified type's files; for non-web types they say "Do NOT create index.html/style.css/script.js".
+
+Verification already matches the type (the gate only applies web/DOM/visual checks when an index.html exists; CLIs/packages/servers are checked via syntax + their own test/run command), so non-web projects are no longer judged as broken web pages.
+
+Tests: +tests/projectType.test.js (8) covering all four required regression prompts (Python CLI, AI harness, browser harness UI, Node benchmark harness), the existing web/game flows (no regression), the full type set, and "anything you want" not being forced into a web preview. Suite 598/598, harness-eval 10/10, harness-security 6/6, build:renderer OK.
+
+
 ## [46.28.0] - 2026-06-29 — Code Mode: visual game verification (a blank preview can no longer pass)
 
 Code Mode only — Agent and Chat mode unchanged; game acceptance for game prompts is kept.

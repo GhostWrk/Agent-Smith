@@ -9,11 +9,24 @@ const { executeTool } = require('../tools/executor.js');
 const { selectToolsForTurn } = require('../tools/router.js');
 const { SUBMIT_CODE_PLAN } = require('../tools/planTools.js');
 const { createPlan, defaultPlan } = require('../plan/codePlan.js');
+const { projectTypeProfile } = require('../plan/projectType.js');
 const gemmaHarness = require('../context/gemmaHarness.js');
 
-const PLANNING_SYSTEM = `You are Agent Smith in PLANNING mode. Explore the project with read-only tools, then call submit_code_plan with 4–6 ordered steps (not 10+ micro-steps).
-For a new web app use milestones like: index.html structure, style.css, script.js logic, README + verify.
-Do NOT write or patch files. Do NOT declare the task done. Your only exit is submit_code_plan.`;
+// Build a planning prompt CLASSIFIED to the requested artifact type, so Code Mode doesn't default
+// every task to a web page. The profile names the files appropriate to the detected type and, for
+// non-web types, forbids the index.html/style.css/script.js scaffold.
+function buildPlanningSystem(goal) {
+    const p = projectTypeProfile(goal);
+    const webish = p.type === 'static_web_app' || p.type === 'game' || p.type === 'electron_app';
+    return [
+        'You are Agent Smith in PLANNING mode. Explore the project with read-only tools, then call submit_code_plan with 4–6 ordered steps (not 10+ micro-steps).',
+        `This request looks like a ${p.label}. Plan files appropriate to THAT artifact type — typically: ${p.files}.`,
+        webish ? '' : 'This is NOT a web UI: do NOT plan index.html, style.css, or script.js. Use the source/config files the task actually needs.',
+        p.confident ? '' : 'The type is ambiguous — pick the most likely (a script/CLI, not a web page, unless a browser UI was requested) and STATE that assumption in step 1.',
+        'Only build a browser/web scaffold when the user clearly asked for a web UI, website, page, frontend, or visual interface.',
+        'Do NOT write or patch files. Do NOT declare the task done. Your only exit is submit_code_plan.'
+    ].filter(Boolean).join('\n');
+}
 
 const MAX_PLAN_TURNS = 8;
 
@@ -45,7 +58,7 @@ async function runPlanningPhase(ctx) {
             : 'Continue exploring or call submit_code_plan now with your step list.';
 
         let bodyMessages = [
-            { role: 'system', content: PLANNING_SYSTEM },
+            { role: 'system', content: buildPlanningSystem(session.goal) },
             ...session.messages.slice(-12),
             { role: 'user', content: hint }
         ];

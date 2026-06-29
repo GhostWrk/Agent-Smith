@@ -87,33 +87,24 @@ function webAppBuildSteps() {
 }
 
 function defaultPlan(goal) {
-    const g = String(goal || '').toLowerCase();
-    // New deliverable: branch by task type so a budget tracker doesn't get game wording.
-    if (goalImpliesNewArtifacts(goal)) {
-        return {
-            goal: String(goal || '').trim(),
-            steps: goalIsGame(goal) ? gameBuildSteps() : webAppBuildSteps(),
-            currentStepIndex: 0,
-            approvedAt: null
-        };
-    }
-    const steps = g.includes('fix') || g.includes('bug')
-        ? [
-            { id: stepId(), title: 'Read and locate the issue', status: 'active' },
-            { id: stepId(), title: 'Apply targeted fixes', status: 'pending' },
-            { id: stepId(), title: 'Verify tests or syntax', status: 'pending' }
-        ]
-        : [
-            { id: stepId(), title: 'Explore project layout and constraints', status: 'active' },
-            { id: stepId(), title: 'Implement required files', status: 'pending' },
-            { id: stepId(), title: 'Verify and polish', status: 'pending' }
-        ];
-    return {
+    // Classify the requested artifact type FIRST so Code Mode builds the right thing (CLI, library,
+    // API server, harness, script, game, web app, …) instead of defaulting to a web page.
+    const { projectTypeProfile } = require('./projectType.js');
+    const profile = projectTypeProfile(goal);
+    const wrap = (steps) => ({
         goal: String(goal || '').trim(),
-        steps,
+        steps: steps.map((s, i) => typeof s === 'string'
+            ? { id: stepId(), title: s, status: i === 0 ? 'active' : 'pending' }
+            : s),
         currentStepIndex: 0,
-        approvedAt: null
-    };
+        approvedAt: null,
+        projectType: profile.type
+    });
+    // Web/game keep their established milestone wording (the plan auto-advance matches on it).
+    if (profile.type === 'game') return wrap(gameBuildSteps());
+    if (profile.type === 'static_web_app') return wrap(webAppBuildSteps());
+    // Everything else gets file-appropriate steps — NOT index.html/style.css/script.js.
+    return wrap(profile.steps);
 }
 
 function markApproved(plan) {

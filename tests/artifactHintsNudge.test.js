@@ -18,11 +18,17 @@ test('missing-refs nudge for a NON-game app: no game/pacman framing, explicit sa
     assert.doesNotMatch(n, /win\/lose/i);
 });
 
-test('write nudge for a NON-game app describes app logic, not a game loop', () => {
+test('write nudge for a NON-game app describes a web app, not a game loop', () => {
     const n = buildWriteNudge('Build an offline-first Kanban board', root);
-    assert.match(n, /app logic/i);
+    assert.match(n, /web app|index\.html/i);
     assert.doesNotMatch(n, /win\/lose/i);
     assert.doesNotMatch(n, /pacman/i);
+});
+
+test('write nudge for a NON-web tool does NOT push index.html/style.css/script.js', () => {
+    const n = buildWriteNudge('Build a Python log analyzer CLI', root);
+    assert.match(n, /Python CLI|main\.py/i);
+    assert.match(n, /Do NOT create index\.html/i);
 });
 
 test('GAME goals still get game-specific hints', () => {

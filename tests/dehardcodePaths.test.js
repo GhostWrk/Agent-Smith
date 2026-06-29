@@ -55,7 +55,7 @@ test('seedPendingMissingRefs seeds nothing when no index.html exists yet', () =>
 
 test('buildNewArtifactBlock prescribes no fixed subdir (greenfield lets the model choose)', () => {
     const block = buildNewArtifactBlock('Build a Pac-Man game', '/tmp/does-not-matter');
-    assert.match(block, /create the files your task needs/i);
+    assert.match(block, /create:|choose whatever structure fits/i);
     assert.doesNotMatch(block, /pacman\/|app\/index\.html|site\/index\.html/);
 });
 
