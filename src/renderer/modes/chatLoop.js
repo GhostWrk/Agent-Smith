@@ -4,12 +4,26 @@
 (function (global) {
     'use strict';
 
-    async function firePluginHook(api, event, payload) {
+    function withTimeout(promise, ms, label, controller) {
+        let timer;
+        const timeoutPromise = new Promise((_, reject) => {
+            timer = setTimeout(() => {
+                if (controller) { try { controller.abort(); } catch (e) { /* ignore */ } }
+                reject(new Error(`${label} timed out after ${ms}ms`));
+            }, ms);
+        });
+        return Promise.race([
+            Promise.resolve(promise).finally(() => clearTimeout(timer)),
+            timeoutPromise
+        ]);
+    }
+
+    async function firePluginHook(api, event, payload, timeoutMs = 10000) {
         if (!api) return null;
         try {
-            return await api.invoke('plugin-fire-hook', { hookEvent: event, payload: payload || {} });
+            return await withTimeout(api.invoke('plugin-fire-hook', { hookEvent: event, payload: payload || {} }), timeoutMs, `Plugin hook ${event}`);
         } catch (e) {
-            return null;
+            return { error: e.message || String(e), timedOut: /timed out/i.test(e.message || '') };
         }
     }
 
@@ -24,7 +38,15 @@
 
             emit({ type: 'tool_start', name, args, callId: toolId });
 
-            const before = await firePluginHook(deps.api, 'beforeToolCall', { tool: name, name, args });
+            const hookTimeoutMs = deps.hookTimeoutMs || 10000;
+            const toolTimeoutMs = deps.toolTimeoutMs || 300000;
+            const before = await firePluginHook(deps.api, 'beforeToolCall', { tool: name, name, args }, hookTimeoutMs);
+            if (before?.timedOut) {
+                const timeout = `Error: ${before.error}`;
+                emit({ type: 'tool_result', name, ok: false, result: { error: timeout, timedOut: true }, callId: toolId, durationMs: 0 });
+                results.push({ tool: t, result: timeout, toolId });
+                continue;
+            }
             if (before?.blocked) {
                 const blocked = `[BLOCKED] ${before.reason || 'plugin hook'}`;
                 emit({ type: 'tool_result', name, ok: false, result: { error: blocked }, callId: toolId, durationMs: 0 });
@@ -36,7 +58,8 @@
             let result;
             try {
                 if (deps.executeTool) {
-                    result = await deps.executeTool(name, args, deps);
+                    const controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+                    result = await withTimeout(deps.executeTool(name, args, deps, { signal: controller?.signal }), toolTimeoutMs, `Tool ${name}`, controller);
                 } else {
                     result = 'Error: executeTool not provided';
                 }
@@ -50,7 +73,10 @@
                 }
             }
 
-            await firePluginHook(deps.api, 'afterToolCall', { tool: name, name, args, result });
+            const after = await firePluginHook(deps.api, 'afterToolCall', { tool: name, name, args, result }, hookTimeoutMs);
+            if (after?.timedOut && deps.trace) {
+                deps.trace.addStep('tools.hook', 'tools', 'error', 'HOOK_TIMEOUT', Date.now() - startTool, after.error, name);
+            }
 
             const ok = !String(result).startsWith('Error:') && !String(result).startsWith('[BLOCKED]');
             emit({
@@ -66,7 +92,7 @@
         return results;
     }
 
-    const api = { executeAgentToolBatch, firePluginHook };
+    const api = { executeAgentToolBatch, firePluginHook, withTimeout };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     if (typeof window !== 'undefined') window.XKChatLoop = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
