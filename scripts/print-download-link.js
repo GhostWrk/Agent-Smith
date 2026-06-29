@@ -69,7 +69,7 @@ async function login() {
     if (!password) return null;
     const res = await httpJson('POST', '/api/invoke', {
         channel: 'auth-login',
-        args: [username, password]
+        args: [{ username, password }]
     }, { 'x-auth-action': 'login' });
     if (res.json && res.json.token) return res.json.token;
     throw new Error(res.json.error || `Login failed (HTTP ${res.status})`);

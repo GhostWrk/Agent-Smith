@@ -58,7 +58,7 @@ const handlers = new Map();
 const userDataPath = fs.mkdtempSync(path.join(os.tmpdir(), 'agent100-data-'));
 const changeLedger = new ChangeLedger(userDataPath);
 const editEngine = new EditEngine(changeLedger, projectContext);
-const actionLog = createActionLog(userDataPath);
+const actionLog = createActionLog({ userDataPath });
 const ipcShim = { handle: (c, fn) => handlers.set(c, fn) };
 registerAgentIpc(ipcShim, {
     fs, fsPromises, path, spawn, exec,
