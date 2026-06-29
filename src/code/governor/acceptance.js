@@ -115,10 +115,9 @@ function gameAcceptanceChecks({ html, js }) {
         false, 'player class/element present');
 
     const scoreMutated = hasJs(/\bscore\b\s*(\+\+|--|\+=|-=)/i) ||
-        hasJs(/\bscore\s*=\s*score\s*[+\-*/]/i) ||
-        hasJs(/(?:addEventListener|setInterval|setTimeout|requestAnimationFrame|function\s+\w+|=>)[\s\S]{0,400}\bscore\s*=/i);
-    const scoreShown = hasJs(/score[A-Za-z]*\.(textContent|innerText|innerHTML)\s*=\s*[^;\n]*\bscore\b/i) ||
-        hasJs(/\.(textContent|innerText|innerHTML)\s*=\s*[^;\n]*\bscore\b/i);
+        hasJs(/\bscore\s*=\s*score\s*[+\-*/]/i);
+    const scoreShown = hasJs(/score[A-Za-z]*\.(textContent|innerText|innerHTML)\s*=\s*[^'";\n]*\bscore\b/i) ||
+        hasJs(/\.(textContent|innerText|innerHTML)\s*=\s*[^'";\n]*\bscore\b/i);
     add('score', 'score updates', scoreMutated && scoreShown, false, 'score variable mutated and rendered');
 
     add('endstate', 'win/lose or completion state',

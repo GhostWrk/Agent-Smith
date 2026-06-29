@@ -412,7 +412,8 @@ async function runTurnLoop(ctx) {
                         // browser so the status reflects whether it actually runs.
                         runtimeVerify: execDeps && execDeps.runtimeVerify,
                         changeLedger: execDeps && execDeps.changeLedger,
-                        sessionId: session.id
+                        sessionId: session.id,
+                        projectRulesEnabled: session.projectRulesEnabled === true || process.env.AGENT_SMITH_ENABLE_PROJECT_RULES === '1'
                     }
                 );
             } catch (e) {

@@ -1,4 +1,4 @@
-const { exec } = require('child_process');
+const { exec, execFile } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 
@@ -7,13 +7,15 @@ const MAX_REFLECTIONS = 3;
 // Run one checker command. Distinguishes three outcomes so a missing tool is a
 // SKIP (not a failure): { ran:false } = tool absent; { ran:true, ok:true } = passed;
 // { ran:true, ok:false, message, raw } = real error.
-function execCheck(cmd, timeout = 20000) {
+// Accepts an argv array (no shell interpolation) to prevent command injection via
+// filenames containing shell metacharacters.
+function execCheck(argv, timeout = 20000) {
     return new Promise((resolve) => {
-        exec(cmd, { timeout }, (error, stdout, stderr) => {
+        execFile(argv[0], argv.slice(1), { timeout, shell: false }, (error, stdout, stderr) => {
             if (!error) return resolve({ ran: true, ok: true });
             const raw = (stderr || stdout || error.message || '').toString();
             // Tool not installed → treat as "couldn't check", never as a failure.
-            if (error.code === 127 || /is not recognized|not recognized as|command not found|ENOENT|No such file|Microsoft Store|App-Ausf.hrungsaliase|App Execution Aliases|Python was not found/i.test(raw)) {
+            if (error.code === 'ENOENT' || error.code === 127 || /is not recognized|not recognized as|command not found|Microsoft Store|App-Ausf.hrungsaliase|App Execution Aliases|Python was not found/i.test(raw)) {
                 return resolve({ ran: false });
             }
             if (error.killed) return resolve({ ran: true, ok: false, message: 'check timed out', raw });
@@ -33,7 +35,6 @@ function execCheck(cmd, timeout = 20000) {
 async function syntaxCheckFile(projectRoot, relPath) {
     const abs = path.isAbsolute(relPath) ? relPath : path.join(projectRoot, relPath);
     const ext = path.extname(abs).toLowerCase();
-    const q = JSON.stringify(abs);
 
     if (ext === '.json') {
         try { JSON.parse(fs.readFileSync(abs, 'utf-8')); return { ok: true }; }
@@ -44,8 +45,10 @@ async function syntaxCheckFile(projectRoot, relPath) {
     // genuine SYNTAX errors (TS1xxx) are treated as failures; everything else (e.g.
     // TS2307 cannot-find-module) is ignored to avoid false build-blocking.
     if (['.ts', '.tsx', '.mts', '.cts'].includes(ext)) {
-        const jsx = ext === '.tsx' ? '--jsx react ' : '';
-        const r = await execCheck(`tsc --noEmit --skipLibCheck --isolatedModules ${jsx}${q}`);
+        const tscArgs = ['--noEmit', '--skipLibCheck', '--isolatedModules'];
+        if (ext === '.tsx') tscArgs.push('--jsx', 'react');
+        tscArgs.push(abs);
+        const r = await execCheck(['tsc', ...tscArgs]);
         if (!r.ran) return { ok: true, skipped: true, toolMissing: true };
         if (r.ok) return { ok: true };
         if (/error TS1\d{3}/.test(r.raw || '')) return { ok: false, file: relPath, message: r.message };
@@ -53,26 +56,26 @@ async function syntaxCheckFile(projectRoot, relPath) {
     }
 
     const CHECKS = {
-        '.js': [`node --check ${q}`],
-        '.cjs': [`node --check ${q}`],
-        '.mjs': [`node --check ${q}`],
-        '.py': [`python -m py_compile ${q}`, `py -3 -m py_compile ${q}`, `python3 -m py_compile ${q}`],
-        '.go': [`gofmt -e ${q}`],
-        '.rb': [`ruby -c ${q}`],
-        '.php': [`php -l ${q}`],
+        '.js': [['node', '--check', abs]],
+        '.cjs': [['node', '--check', abs]],
+        '.mjs': [['node', '--check', abs]],
+        '.py': [['python', '-m', 'py_compile', abs], ['py', '-3', '-m', 'py_compile', abs], ['python3', '-m', 'py_compile', abs]],
+        '.go': [['gofmt', '-e', abs]],
+        '.rb': [['ruby', '-c', abs]],
+        '.php': [['php', '-l', abs]],
         // Pure single-file syntax checks; each is a no-side-effect flag and SKIPS when
         // the toolchain isn't installed (never a false failure).
-        '.sh': [`bash -n ${q}`, `sh -n ${q}`],
-        '.bash': [`bash -n ${q}`],
-        '.pl': [`perl -c ${q}`],
-        '.lua': [`luac -p ${q}`],
-        '.c': [`gcc -fsyntax-only ${q}`, `clang -fsyntax-only ${q}`],
-        '.h': [`gcc -fsyntax-only ${q}`, `clang -fsyntax-only ${q}`],
-        '.cpp': [`g++ -fsyntax-only ${q}`, `clang++ -fsyntax-only ${q}`],
-        '.cc': [`g++ -fsyntax-only ${q}`, `clang++ -fsyntax-only ${q}`],
-        '.cxx': [`g++ -fsyntax-only ${q}`, `clang++ -fsyntax-only ${q}`],
-        '.hpp': [`g++ -fsyntax-only ${q}`, `clang++ -fsyntax-only ${q}`],
-        '.rs': [`rustc --edition 2021 --crate-type lib --emit=metadata -o ${process.platform === 'win32' ? 'NUL' : '/dev/null'} ${q}`],
+        '.sh': [['bash', '-n', abs], ['sh', '-n', abs]],
+        '.bash': [['bash', '-n', abs]],
+        '.pl': [['perl', '-c', abs]],
+        '.lua': [['luac', '-p', abs]],
+        '.c': [['gcc', '-fsyntax-only', abs], ['clang', '-fsyntax-only', abs]],
+        '.h': [['gcc', '-fsyntax-only', abs], ['clang', '-fsyntax-only', abs]],
+        '.cpp': [['g++', '-fsyntax-only', abs], ['clang++', '-fsyntax-only', abs]],
+        '.cc': [['g++', '-fsyntax-only', abs], ['clang++', '-fsyntax-only', abs]],
+        '.cxx': [['g++', '-fsyntax-only', abs], ['clang++', '-fsyntax-only', abs]],
+        '.hpp': [['g++', '-fsyntax-only', abs], ['clang++', '-fsyntax-only', abs]],
+        '.rs': [['rustc', '--edition', '2021', '--crate-type', 'lib', '--emit=metadata', '-o', process.platform === 'win32' ? 'NUL' : '/dev/null', abs]],
     };
     const cmds = CHECKS[ext];
     if (!cmds) return { ok: true, skipped: true }; // unsupported extension

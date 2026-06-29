@@ -23,8 +23,12 @@ function tryRequireJsdom() {
 }
 
 function isInsideProjectRoot(projectRoot, abs) {
-    const rel = path.relative(path.resolve(projectRoot), path.resolve(abs));
-    return rel === '' || !!rel && !rel.startsWith('..') && !path.isAbsolute(rel);
+    let realRoot, realAbs;
+    try { realRoot = fs.realpathSync(path.resolve(projectRoot)); } catch (e) { realRoot = path.resolve(projectRoot); }
+    try { realAbs = fs.realpathSync(path.resolve(abs)); } catch (e) { realAbs = path.resolve(abs); }
+    const rel = path.relative(realRoot, realAbs);
+    return rel === ''
+        || (!!rel && rel !== '..' && !rel.startsWith('..' + path.sep) && !path.isAbsolute(rel));
 }
 
 function readLocalScripts(projectRoot, html, htmlDir) {
@@ -33,7 +37,9 @@ function readLocalScripts(projectRoot, html, htmlDir) {
     for (const ref of scripts) {
         if (/^https?:\/\//i.test(ref)) continue; // external CDN — out of scope
         const rel = ref.replace(/^\.\//, '');
-        const abs = path.resolve(htmlDir, rel);
+        const abs = rel.startsWith('/')
+            ? path.join(projectRoot, rel.replace(/^\/+/, ''))
+            : path.resolve(htmlDir, rel);
         if (!isInsideProjectRoot(projectRoot, abs)) {
             sources.push({ ref, code: null, outsideRoot: true });
             continue;

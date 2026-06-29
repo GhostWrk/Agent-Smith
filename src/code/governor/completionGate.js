@@ -116,8 +116,12 @@ function readSafe(abs) {
 }
 
 function isInsideProjectRoot(projectRoot, abs) {
-    const rel = path.relative(path.resolve(projectRoot), path.resolve(abs));
-    return rel === '' || !!rel && !rel.startsWith('..') && !path.isAbsolute(rel);
+    let realRoot, realAbs;
+    try { realRoot = fs.realpathSync(path.resolve(projectRoot)); } catch (e) { realRoot = path.resolve(projectRoot); }
+    try { realAbs = fs.realpathSync(path.resolve(abs)); } catch (e) { realAbs = path.resolve(abs); }
+    const rel = path.relative(realRoot, realAbs);
+    return rel === ''
+        || (!!rel && rel !== '..' && !rel.startsWith('..' + path.sep) && !path.isAbsolute(rel));
 }
 
 /**
@@ -245,13 +249,31 @@ async function runValidation(projectRoot, filesTouched, goal, opts = {}) {
 
     if (htmlRel) {
         hasHtml = true;
+        const htmlAbs = path.join(projectRoot, htmlRel);
+        const htmlDir = path.dirname(htmlAbs);
+
+        // Pre-scan for out-of-root refs BEFORE normalization, so the normalizer
+        // can't rewrite sibling files that are outside the project root.
+        const preHtml = readSafe(htmlAbs) || '';
+        const preRefs = wv.extractHtmlRefs(preHtml);
+        for (const ref of [...preRefs.scripts, ...preRefs.styles]) {
+            if (/^https?:\/\//i.test(ref)) continue;
+            const refClean = ref.replace(/^\.\//, '');
+            const refAbs = refClean.startsWith('/')
+                ? path.join(projectRoot, refClean.replace(/^\/+/, ''))
+                : path.resolve(htmlDir, refClean);
+            if (!isInsideProjectRoot(projectRoot, refAbs)) {
+                ranChecks++;
+                const refRel = path.relative(projectRoot, refAbs).split(path.sep).join('/');
+                messages.push(`[WEB] ${htmlRel} references "${ref}" outside the project root (${refRel})`);
+            }
+        }
+
         // Deterministic repair of inconsistent multi-file wiring (the #1 reason a "built"
         // app doesn't run on local models): classic <script> + import/export, OR type="module"
         // + code that relies on window.* globals that module scope never sets. Make it actually
         // runnable before the reference/smoke checks evaluate it. Real ES-module apps untouched.
         try { await normalizeWebProject(projectRoot, htmlRel, { changeLedger: opts.changeLedger, sessionId: opts.sessionId }); } catch (e) { /* non-fatal */ }
-        const htmlAbs = path.join(projectRoot, htmlRel);
-        const htmlDir = path.dirname(htmlAbs);
         combinedHtml = readSafe(htmlAbs) || '';
 
         // HTML well-formedness
@@ -264,7 +286,10 @@ async function runValidation(projectRoot, filesTouched, goal, opts = {}) {
         for (const ref of [...scripts, ...styles]) {
             if (/^https?:\/\//i.test(ref)) continue;
             ranChecks++;
-            const refAbs = path.resolve(htmlDir, ref.replace(/^\.\//, ''));
+            const refClean = ref.replace(/^\.\//, '');
+            const refAbs = refClean.startsWith('/')
+                ? path.join(projectRoot, refClean.replace(/^\/+/, ''))
+                : path.resolve(htmlDir, refClean);
             const refRel = path.relative(projectRoot, refAbs).split(path.sep).join('/');
             if (!isInsideProjectRoot(projectRoot, refAbs)) {
                 messages.push(`[WEB] ${htmlRel} references "${ref}" outside the project root (${refRel})`);
@@ -285,11 +310,17 @@ async function runValidation(projectRoot, filesTouched, goal, opts = {}) {
         const cssAbs = new Set();
         const jsAbs = new Set();
         for (const ref of styles) if (!/^https?:\/\//i.test(ref)) {
-            const abs = path.resolve(htmlDir, ref.replace(/^\.\//, ''));
+            const refClean = ref.replace(/^\.\//, '');
+            const abs = refClean.startsWith('/')
+                ? path.join(projectRoot, refClean.replace(/^\/+/, ''))
+                : path.resolve(htmlDir, refClean);
             if (isInsideProjectRoot(projectRoot, abs)) cssAbs.add(abs);
         }
         for (const ref of scripts) if (!/^https?:\/\//i.test(ref)) {
-            const abs = path.resolve(htmlDir, ref.replace(/^\.\//, ''));
+            const refClean = ref.replace(/^\.\//, '');
+            const abs = refClean.startsWith('/')
+                ? path.join(projectRoot, refClean.replace(/^\/+/, ''))
+                : path.resolve(htmlDir, refClean);
             if (isInsideProjectRoot(projectRoot, abs)) jsAbs.add(abs);
         }
         for (const rel of files) {
