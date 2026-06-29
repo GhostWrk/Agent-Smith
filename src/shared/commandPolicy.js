@@ -15,10 +15,63 @@
 
 const path = require('path');
 
-// Layer 1 — catastrophic / host-level. Matched case-insensitively against the normalized command.
+// Root-ish destruction targets. Tokens are compared after stripping surrounding
+// quotes and lowercasing so `'/'`, `"/"`, and `$HOME` all normalize here.
+const ROOT_TARGETS = new Set(['/', '/.', '/*', '~', '~/', '$home', '${home}', '${home}/', '$env:userprofile']);
+
+function stripQuotes(tok) {
+    return tok.replace(/^['"]+|['"]+$/g, '');
+}
+function isRootTarget(tok) {
+    let t = stripQuotes(tok).toLowerCase();
+    if (ROOT_TARGETS.has(t)) return true;
+    // Also match trailing-slash variants: ${HOME}/ → ${home}, ~/ stays
+    if (t.endsWith('/') && t !== '/' && t !== '~/') {
+        return ROOT_TARGETS.has(t.slice(0, -1)) || ROOT_TARGETS.has(t);
+    }
+    return ROOT_TARGETS.has(t);
+}
+function isOption(tok) {
+    return tok.startsWith('-');
+}
+// A recursive flag in any short cluster (-rf, -fr, -Rf) or GNU long form (--recursive).
+function isRecursiveFlag(tok) {
+    return /^--recursive$/i.test(tok) || /^-[a-z]*r[a-z]*$/i.test(tok);
+}
+
+// Split a command line into separate invocations on shell separators so a chained
+// `cd /tmp && rm -rf /` is inspected as two independent segments.
+function commandSegments(cmd) {
+    return cmd.split(/(?:&&|\|\||[;|&\n])/);
+}
+
+// Generic destructive-root matcher: does any invocation of `name` carry a recursive
+// flag AND target a root/home path? Tolerant of long options (incl.
+// `--no-preserve-root`) appearing before or after the target. This replaces the
+// position-sensitive regexes that GNU long options could slip past.
+function recursiveRootCommand(cmd, name) {
+    const nameRe = new RegExp(`(^|[/\\\\])${name}$`, 'i');
+    for (const seg of commandSegments(cmd)) {
+        const toks = seg.trim().split(/\s+/).filter(Boolean);
+        const idx = toks.findIndex(t => nameRe.test(t));
+        if (idx === -1) continue;
+        const rest = toks.slice(idx + 1);
+        const hasRecursive = rest.some(isRecursiveFlag);
+        const hasRootTarget = rest.some(t => !isOption(t) && isRootTarget(t));
+        if (hasRecursive && hasRootTarget) return true;
+    }
+    return false;
+}
+
+// Layer 1 — catastrophic / host-level. Each rule is { re, reason } (regex) or
+// { test, reason } (predicate); matched case-insensitively, first match blocks.
 const RULES = [
-    { re: /\brm\s+(?:-[a-z]*\s+)*-?[a-z]*r[a-z]*f?[a-z]*\b[^\n]*\s(?:\/|~|\/\*|\$HOME|\$\{HOME\})(?:\s|$)/i, reason: 'recursive delete of a root/home directory' },
-    { re: /\brm\s+-[rf]+\s+\/(?:\s|$)/i, reason: 'rm -rf /' },
+    // Recursive force-delete / chmod / chown of a root / home / wildcard root.
+    // Token-based so long options like `--no-preserve-root` / `--recursive` can't bypass.
+    { test: (c) => recursiveRootCommand(c, 'rm'), reason: 'recursive delete of a root/home directory' },
+    { test: (c) => recursiveRootCommand(c, 'chmod'), reason: 'recursive chmod of a root/home directory' },
+    { test: (c) => recursiveRootCommand(c, 'chown'), reason: 'recursive chown of a root/home directory' },
+    // Windows mass delete / format
     { re: /\b(?:del|erase)\b[^\n]*\/[sq][^\n]*[a-z]:\\/i, reason: 'recursive Windows delete of a drive root' },
     { re: /\b(?:rd|rmdir)\b[^\n]*\/s[^\n]*[a-z]:\\?/i, reason: 'recursive Windows directory removal of a drive' },
     { re: /\bformat\s+[a-z]:/i, reason: 'disk format' },
@@ -26,8 +79,7 @@ const RULES = [
     { re: /\bmkfs(\.\w+)?\b/i, reason: 'filesystem creation (mkfs)' },
     { re: /\bdd\b[^\n]*\bof=\/dev\/(sd|nvme|disk|hd|vd)/i, reason: 'dd writing to a raw disk device' },
     { re: />\s*\/dev\/(sd|nvme|disk|hd|vd)/i, reason: 'redirect into a raw disk device' },
-    { re: /\bchmod\s+-R\s+[0-7]{3,4}\s+\/(?:\s|$)/i, reason: 'recursive chmod of /' },
-    { re: /\bchown\s+-R\b[^\n]*\s\/(?:\s|$)/i, reason: 'recursive chown of /' },
+    // Fork bomb
     { re: /:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/, reason: 'fork bomb' },
     { re: /\b(?:curl|wget|iwr|invoke-webrequest)\b[^|\n]*\|\s*(?:sudo\s+)?(?:sh|bash|zsh|dash|powershell|pwsh|python\d?|node|ruby|perl)\b/i, reason: 'piping a remote download straight into an interpreter' },
     { re: /\b(?:iex|invoke-expression)\b[^\n]*(?:downloadstring|webclient|invoke-webrequest|iwr|curl|wget)/i, reason: 'IEX of a remote download (PowerShell)' },
@@ -90,7 +142,8 @@ function assessCommand(command, opts = {}) {
     if (!cmd) return { allowed: true };
 
     for (const rule of RULES) {
-        if (rule.re.test(cmd)) return { allowed: false, reason: rule.reason };
+        const matched = rule.re ? rule.re.test(cmd) : rule.test(cmd);
+        if (matched) return { allowed: false, reason: rule.reason };
     }
     if (HOME_SECRET.test(cmd) || SYS_SECRET.test(cmd)) {
         return { allowed: false, reason: 'accesses home dotfiles / credentials / system secrets outside the project' };

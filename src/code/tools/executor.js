@@ -229,7 +229,10 @@ async function executeTool(name, args, deps) {
                 existed = true;
             } catch (e) { /* new file */ }
             if (existed) {
-                await changeLedger.snapshotBefore(sessionId, resolved.path, 'write');
+                const snap = await changeLedger.snapshotBefore(sessionId, resolved.path, 'write');
+                if (snap && snap.error) {
+                    return { error: `Refusing to write — could not snapshot the existing file for Revert All: ${snap.error}` };
+                }
             } else {
                 await changeLedger.recordCreate(sessionId, resolved.path);
             }
@@ -303,7 +306,10 @@ async function executeTool(name, args, deps) {
                     };
                 }
             }
-            await changeLedger.snapshotBefore(sessionId, resolved.path, 'append');
+            const appendSnap = await changeLedger.snapshotBefore(sessionId, resolved.path, 'append');
+            if (appendSnap && appendSnap.error) {
+                return { error: `Refusing to append — could not snapshot the existing file for Revert All: ${appendSnap.error}` };
+            }
             const appended = String(a.content || '');
             const next = before + appended;
             await fs.writeFile(resolved.path, next, 'utf-8');
@@ -329,7 +335,7 @@ async function executeTool(name, args, deps) {
         }
         case 'grep': {
             const root = projectContext.getRoot();
-            const r = await grepProject(root, a.pattern, a.glob || '**/*');
+            const r = await grepProject(root, a.pattern, { glob: a.glob || '**/*' });
             if (r.error) return r;
             const hits = (r.hits || []).slice(0, 50);
             return { hits: hits.map(h => ({ file: h.file, line: h.line, text: h.text })), truncated: (r.hits || []).length > 50 };
