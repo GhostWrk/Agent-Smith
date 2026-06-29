@@ -16,10 +16,19 @@
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
-const { extractHtmlRefs, extractHtmlClassesIds } = require('./webValidators.js');
+const { extractHtmlRefs, extractHtmlClassesIds, validateDomIdConsistency } = require('./webValidators.js');
 
 function tryRequireJsdom() {
     try { return require('jsdom'); } catch (e) { return null; }
+}
+
+function isInsideProjectRoot(projectRoot, abs) {
+    let realRoot, realAbs;
+    try { realRoot = fs.realpathSync(path.resolve(projectRoot)); } catch (e) { realRoot = path.resolve(projectRoot); }
+    try { realAbs = fs.realpathSync(path.resolve(abs)); } catch (e) { realAbs = path.resolve(abs); }
+    const rel = path.relative(realRoot, realAbs);
+    return rel === ''
+        || (!!rel && rel !== '..' && !rel.startsWith('..' + path.sep) && !path.isAbsolute(rel));
 }
 
 function readLocalScripts(projectRoot, html, htmlDir) {
@@ -28,7 +37,13 @@ function readLocalScripts(projectRoot, html, htmlDir) {
     for (const ref of scripts) {
         if (/^https?:\/\//i.test(ref)) continue; // external CDN — out of scope
         const rel = ref.replace(/^\.\//, '');
-        const abs = path.resolve(htmlDir, rel);
+        const abs = rel.startsWith('/')
+            ? path.join(projectRoot, rel.replace(/^\/+/, ''))
+            : path.resolve(htmlDir, rel);
+        if (!isInsideProjectRoot(projectRoot, abs)) {
+            sources.push({ ref, code: null, outsideRoot: true });
+            continue;
+        }
         try {
             sources.push({ ref, code: fs.readFileSync(abs, 'utf-8') });
         } catch (e) {
@@ -39,7 +54,6 @@ function readLocalScripts(projectRoot, html, htmlDir) {
     for (const m of html.matchAll(/<script(?![^>]*\ssrc=)[^>]*>([\s\S]*?)<\/script>/gi)) {
         if (m[1] && m[1].trim()) sources.push({ ref: '(inline)', code: m[1] });
     }
-    void projectRoot;
     return sources;
 }
 
@@ -152,7 +166,9 @@ function makeStubDom(htmlIds) {
 function runVmEngine(sources, html) {
     const errors = [];
     const missing = sources.filter(s => s.missing).map(s => s.ref);
+    const outsideRoot = sources.filter(s => s.outsideRoot).map(s => s.ref);
     for (const m of missing) errors.push(`referenced script not found: ${m}`);
+    for (const m of outsideRoot) errors.push(`referenced script outside project root: ${m}`);
 
     const { ids } = extractHtmlClassesIds(html);
     const dom = makeStubDom(ids);
@@ -325,12 +341,21 @@ function runSmokeTest(opts) {
     // Prefer the VM engine: vm.runInContext's timeout (3s) interrupts even a
     // synchronous infinite loop in the project's JS. jsdom's runScripts:'dangerously'
     // has no such guard and would block the event loop, so it is opt-in (XK_SMOKE_JSDOM).
-    const jsdom = process.env.XK_SMOKE_JSDOM ? tryRequireJsdom() : null;
+    const sources = readLocalScripts(projectRoot, html, htmlDir);
+    const blockedSources = sources.some(s => s.outsideRoot);
+    const jsdom = !blockedSources && process.env.XK_SMOKE_JSDOM ? tryRequireJsdom() : null;
     if (jsdom) {
         return runJsdomEngine(jsdom, html, htmlDir, opts.expectedSelectors);
     }
-    const sources = readLocalScripts(projectRoot, html, htmlDir);
-    return runVmEngine(sources, html);
+    const result = runVmEngine(sources, html);
+    if (opts.strictDom !== false) {
+        const js = sources.filter(s => s.code).map(s => s.code).join('\n');
+        for (const issue of validateDomIdConsistency({ html, js })) {
+            if (issue.level === 'error') result.errors.push(issue.message);
+        }
+        result.ok = result.errors.length === 0;
+    }
+    return result;
 }
 
-module.exports = { runSmokeTest, makeStubDom, readLocalScripts };
+module.exports = { runSmokeTest, makeStubDom, readLocalScripts, isInsideProjectRoot };

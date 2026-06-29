@@ -209,7 +209,7 @@ function createDefaultMiddleware(ctx) {
                     session.projectRoot,
                     rel,
                     session.projectMeta,
-                    {}
+                    { projectRulesEnabled: session.projectRulesEnabled === true || process.env.AGENT_SMITH_ENABLE_PROJECT_RULES === '1' }
                 );
                 mergeSensorWarnings(toolResult, sensor);
 

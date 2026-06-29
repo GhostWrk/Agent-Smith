@@ -43,7 +43,7 @@ module.exports = {
     fs.mkdirSync(path.join(root, 'src'), { recursive: true });
     fs.writeFileSync(path.join(root, rel), 'const x = "FORBIDDEN";\n');
 
-    const sensor = await runPostEditChecks(root, rel, {}, {});
+    const sensor = await runPostEditChecks(root, rel, {}, { projectRulesEnabled: true });
     assert.ok(sensor.warnings.some(w => /\[RULE:no-foo\]/.test(w)));
     assert.ok(sensor.remediation.some(r => /remove FORBIDDEN/.test(r)));
 });
@@ -71,7 +71,7 @@ test('postEditSensors middleware merges warnings into tool result', async () => 
     const emitted = [];
     await post.afterTool({
         ctx: { emit: (ev) => emitted.push(ev) },
-        session: { projectRoot: root, projectMeta: {} },
+        session: { projectRoot: root, projectMeta: {}, projectRulesEnabled: true },
         payload: { name: 'write_file', args: { path: srcRel }, toolResult, ok: true }
     });
 

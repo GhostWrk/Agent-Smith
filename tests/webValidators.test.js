@@ -93,3 +93,13 @@ test('parseCssBalanced catches unbalanced braces', () => {
     assert.equal(wv.parseCssBalanced('.a { color: red;').length, 1);
     assert.equal(wv.parseCssBalanced('.a { color: red; }').length, 0);
 });
+
+test('detectSerializationArtifacts ignores legitimate escaped braces in JS literals', () => {
+    const issues = wv.detectSerializationArtifacts('const re = /^\\{.*\\}$/; const s = "\\{";');
+    assert.ok(!issues.some(i => i.code === 'escaped-brace'), JSON.stringify(issues));
+});
+
+test('detectSerializationArtifacts still flags structural escaped braces', () => {
+    const issues = wv.detectSerializationArtifacts('if (ok) \\{ run(); }');
+    assert.ok(issues.some(i => i.code === 'escaped-brace'), JSON.stringify(issues));
+});

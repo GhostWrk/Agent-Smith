@@ -91,9 +91,27 @@ test('smokeTest makeStubDom: getElementById never null, classList.add is recorde
     assert.ok(el, 'getElementById returns a stub, never null');
     el.classList.add('foo');
     assert.ok(dom.classesApplied.has('foo'), 'applied classes are tracked');
+    const rls = tmp('rls-');
     // readLocalScripts marks a missing src
-    const srcs = readLocalScripts('.', '<script src="nope.js"></script>', tmp('rls-'));
+    const srcs = readLocalScripts(rls, '<script src="nope.js"></script>', rls);
     assert.ok(srcs.some(s => s.missing));
+});
+
+test('smokeTest: rejects script refs outside project root', () => {
+    const d = webProject({ 'index.html': '<!doctype html><html><body><script src="../outside.js"></script></body></html>' });
+    const r = runSmokeTest({ projectRoot: d });
+    assert.equal(r.ok, false);
+    assert.match(r.errors.join('\n'), /outside project root/);
+});
+
+test('smokeTest: strict DOM pass catches missing ids hidden by stub DOM', () => {
+    const d = webProject({
+        'index.html': '<!doctype html><html><body><script src="script.js"></script></body></html>',
+        'script.js': 'document.getElementById("missing").textContent = "ready";'
+    });
+    const r = runSmokeTest({ projectRoot: d });
+    assert.equal(r.ok, false);
+    assert.match(r.errors.join('\n'), /missing/);
 });
 
 // ---------- editFormats edge cases (data-loss guards) ----------

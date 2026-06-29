@@ -115,6 +115,15 @@ function readSafe(abs) {
     try { return fs.readFileSync(abs, 'utf-8'); } catch (e) { return null; }
 }
 
+function isInsideProjectRoot(projectRoot, abs) {
+    let realRoot, realAbs;
+    try { realRoot = fs.realpathSync(path.resolve(projectRoot)); } catch (e) { realRoot = path.resolve(projectRoot); }
+    try { realAbs = fs.realpathSync(path.resolve(abs)); } catch (e) { realAbs = path.resolve(abs); }
+    const rel = path.relative(realRoot, realAbs);
+    return rel === ''
+        || (!!rel && rel !== '..' && !rel.startsWith('..' + path.sep) && !path.isAbsolute(rel));
+}
+
 /**
  * Full validation pass over the project. Returns a structured report; pure w.r.t. the
  * model (reads disk only). This is the single source of truth for "is it done?".
@@ -240,13 +249,31 @@ async function runValidation(projectRoot, filesTouched, goal, opts = {}) {
 
     if (htmlRel) {
         hasHtml = true;
+        const htmlAbs = path.join(projectRoot, htmlRel);
+        const htmlDir = path.dirname(htmlAbs);
+
+        // Pre-scan for out-of-root refs BEFORE normalization, so the normalizer
+        // can't rewrite sibling files that are outside the project root.
+        const preHtml = readSafe(htmlAbs) || '';
+        const preRefs = wv.extractHtmlRefs(preHtml);
+        for (const ref of [...preRefs.scripts, ...preRefs.styles]) {
+            if (/^https?:\/\//i.test(ref)) continue;
+            const refClean = ref.replace(/^\.\//, '');
+            const refAbs = refClean.startsWith('/')
+                ? path.join(projectRoot, refClean.replace(/^\/+/, ''))
+                : path.resolve(htmlDir, refClean);
+            if (!isInsideProjectRoot(projectRoot, refAbs)) {
+                ranChecks++;
+                const refRel = path.relative(projectRoot, refAbs).split(path.sep).join('/');
+                messages.push(`[WEB] ${htmlRel} references "${ref}" outside the project root (${refRel})`);
+            }
+        }
+
         // Deterministic repair of inconsistent multi-file wiring (the #1 reason a "built"
         // app doesn't run on local models): classic <script> + import/export, OR type="module"
         // + code that relies on window.* globals that module scope never sets. Make it actually
         // runnable before the reference/smoke checks evaluate it. Real ES-module apps untouched.
         try { await normalizeWebProject(projectRoot, htmlRel, { changeLedger: opts.changeLedger, sessionId: opts.sessionId }); } catch (e) { /* non-fatal */ }
-        const htmlAbs = path.join(projectRoot, htmlRel);
-        const htmlDir = path.dirname(htmlAbs);
         combinedHtml = readSafe(htmlAbs) || '';
 
         // HTML well-formedness
@@ -259,14 +286,21 @@ async function runValidation(projectRoot, filesTouched, goal, opts = {}) {
         for (const ref of [...scripts, ...styles]) {
             if (/^https?:\/\//i.test(ref)) continue;
             ranChecks++;
-            const refAbs = path.resolve(htmlDir, ref.replace(/^\.\//, ''));
+            const refClean = ref.replace(/^\.\//, '');
+            const refAbs = refClean.startsWith('/')
+                ? path.join(projectRoot, refClean.replace(/^\/+/, ''))
+                : path.resolve(htmlDir, refClean);
+            const refRel = path.relative(projectRoot, refAbs).split(path.sep).join('/');
+            if (!isInsideProjectRoot(projectRoot, refAbs)) {
+                messages.push(`[WEB] ${htmlRel} references "${ref}" outside the project root (${refRel})`);
+                continue;
+            }
             if (!fs.existsSync(refAbs)) {
                 // Report the path RELATIVE TO PROJECT ROOT, not the bare href. When
                 // index.html lives in a subdir (e.g. pacman/index.html → "script.js"),
                 // the file must be created at pacman/script.js. Telling the model to
                 // create bare "script.js" makes it write to the root, leaving the
                 // reference missing forever (an infinite reflection loop).
-                const refRel = path.relative(projectRoot, refAbs).split(path.sep).join('/');
                 messages.push(`[WEB] ${htmlRel} references "${ref}" — create the file at ${refRel} (it is missing on disk)`);
                 missingRefs.push(refRel);
             }
@@ -275,8 +309,20 @@ async function runValidation(projectRoot, filesTouched, goal, opts = {}) {
         // gather css/js bodies (referenced + touched)
         const cssAbs = new Set();
         const jsAbs = new Set();
-        for (const ref of styles) if (!/^https?:\/\//i.test(ref)) cssAbs.add(path.resolve(htmlDir, ref.replace(/^\.\//, '')));
-        for (const ref of scripts) if (!/^https?:\/\//i.test(ref)) jsAbs.add(path.resolve(htmlDir, ref.replace(/^\.\//, '')));
+        for (const ref of styles) if (!/^https?:\/\//i.test(ref)) {
+            const refClean = ref.replace(/^\.\//, '');
+            const abs = refClean.startsWith('/')
+                ? path.join(projectRoot, refClean.replace(/^\/+/, ''))
+                : path.resolve(htmlDir, refClean);
+            if (isInsideProjectRoot(projectRoot, abs)) cssAbs.add(abs);
+        }
+        for (const ref of scripts) if (!/^https?:\/\//i.test(ref)) {
+            const refClean = ref.replace(/^\.\//, '');
+            const abs = refClean.startsWith('/')
+                ? path.join(projectRoot, refClean.replace(/^\/+/, ''))
+                : path.resolve(htmlDir, refClean);
+            if (isInsideProjectRoot(projectRoot, abs)) jsAbs.add(abs);
+        }
         for (const rel of files) {
             const abs = path.join(projectRoot, rel);
             if (rel.toLowerCase().endsWith('.css')) cssAbs.add(abs);
@@ -386,7 +432,7 @@ async function runValidation(projectRoot, filesTouched, goal, opts = {}) {
     const planMsg = await runPlanTestVerify(projectRoot, opts.planArtifacts);
     if (planMsg) messages.push(planMsg);
 
-    const rulesResult = await runProjectRulesForProject(projectRoot, filesTouched);
+    const rulesResult = await runProjectRulesForProject(projectRoot, filesTouched, { enabled: opts.projectRulesEnabled });
     if (!rulesResult.ok) {
         ranChecks++;
         messages.push(...rulesResult.messages);

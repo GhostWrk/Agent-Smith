@@ -38,6 +38,18 @@ test('missing refs from a subdir HTML are reported as project-root-relative path
     assert.match(msg, /pacman\/style\.css/);
 });
 
+test('local HTML refs outside project root are rejected', async () => {
+    const root = tmp();
+    const outsideName = path.basename(root) + '-outside.js';
+    const outside = path.join(path.dirname(root), outsideName);
+    fs.writeFileSync(outside, 'window.leaked = true;\n');
+    fs.writeFileSync(path.join(root, 'index.html'), `<!doctype html><html><body><script src="../${outsideName}"></script></body></html>`);
+
+    const r = await runValidation(root, ['index.html'], 'Create a web page');
+    assert.equal(r.allow, false);
+    assert.match(r.messages.join('\n'), /outside the project root/);
+});
+
 test('creating the files at the correct subdir path satisfies the gate', async () => {
     const root = tmp();
     const good = path.join(__dirname, '..', 'examples', 'pacman');

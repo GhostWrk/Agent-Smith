@@ -81,7 +81,7 @@ async function runPostEditChecks(projectRoot, relPath, projectMeta, opts = {}) {
         }
     }
 
-    const rules = await runProjectRulesForFile(projectRoot, relPath, { advisory: true });
+    const rules = await runProjectRulesForFile(projectRoot, relPath, { advisory: true, enabled: opts.projectRulesEnabled });
     for (const v of rules.violations) {
         const line = `[RULE:${v.id}] ${v.message}`;
         warnings.push(line);
