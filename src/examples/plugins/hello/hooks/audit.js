@@ -5,6 +5,6 @@
 module.exports = {
     event: 'beforeToolCall',
     async run(payload, host) {
-        host.log(`about to run tool: ${payload.toolName}`);
+        host.log(`about to run tool: ${payload.tool || payload.name}`);
     },
 };

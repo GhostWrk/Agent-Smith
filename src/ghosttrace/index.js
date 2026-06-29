@@ -1,7 +1,18 @@
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 const os = require('os');
+
+// Run ids end up in output file paths and (previously) a shell command, so they must be a
+// safe slug — no path separators, quotes, or shell metacharacters. Generated ids already
+// satisfy this; caller-supplied ones are validated at construction / export time.
+const RUN_ID_RE = /^[A-Za-z0-9_-]+$/;
+function assertSafeRunId(run_id) {
+    if (typeof run_id !== 'string' || !RUN_ID_RE.test(run_id)) {
+        throw new Error(`Invalid run_id (must match [A-Za-z0-9_-]+): ${run_id}`);
+    }
+    return run_id;
+}
 
 let GHOSTTRACE_DIR, OUTPUTS_DIR;
 
@@ -47,7 +58,7 @@ function generateId() {
 class PipelineTrace {
     constructor(run_id = null, parent_run_id = null, request_id = null) {
         this.schema_version = '1.0';
-        this.run_id = run_id || generateId();
+        this.run_id = (run_id == null) ? generateId() : assertSafeRunId(run_id);
         this.parent_run_id = parent_run_id;
         this.request_id = request_id;
         this.started_at = new Date().toISOString();
@@ -200,12 +211,13 @@ function generateReport(trace, explanation, prompt = "", final_output = "") {
 
     report += `\n--- Final Output ---\n${redact(final_output)}\n`;
 
-    const reportPath = path.join(OUTPUTS_DIR, `ghosttrace_run_${trace.run_id}.txt`);
+    const reportPath = path.join(OUTPUTS_DIR, `ghosttrace_run_${assertSafeRunId(trace.run_id)}.txt`);
     fs.writeFileSync(reportPath, report);
     return reportPath;
 }
 
 function exportBundle(run_id) {
+    assertSafeRunId(run_id);
     const bundleDir = path.join(RUN_BUNDLES_DIR, run_id);
     fs.mkdirSync(bundleDir, { recursive: true });
 
@@ -236,7 +248,9 @@ function exportBundle(run_id) {
     fs.writeFileSync(path.join(bundleDir, 'README.txt'), readme);
 
     const zipPath = path.join(OUTPUTS_DIR, `ghosttrace_run_${run_id}.zip`);
-    execSync(`cd "${RUN_BUNDLES_DIR}" && python3 -m zipfile -c "${zipPath}" "${run_id}"`);
+    // execFileSync (no shell) with run_id as an argv element so a crafted id can't inject
+    // shell syntax; cwd replaces the `cd "..." &&` prefix.
+    execFileSync('python3', ['-m', 'zipfile', '-c', zipPath, run_id], { cwd: RUN_BUNDLES_DIR });
     
     fs.rmSync(bundleDir, { recursive: true, force: true });
     
