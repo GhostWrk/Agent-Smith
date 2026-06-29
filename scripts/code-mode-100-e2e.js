@@ -27,7 +27,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { spawn, exec, execSync } = require('child_process');
+const { spawn, exec, execSync, execFileSync } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
 const projectContext = require(path.join(ROOT, 'src/main/services/projectContext.js'));
@@ -107,7 +107,10 @@ const fileFor = (re) => { for (const f of walk(WS)) if (re.test(path.basename(f)
 // run a produced node/python file and return stdout (empty string on failure)
 function runFile(absPath, runner, args = '') {
     if (!absPath) return { ok: false, out: '' };
-    try { const out = execSync(`${runner} "${absPath}" ${args}`, { cwd: WS, timeout: 30000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); return { ok: true, out }; }
+    // execFileSync (no shell) so a model-chosen filename containing quotes or shell
+    // metacharacters can't break out of the quoted command string. Task args stay an argv array.
+    const argv = Array.isArray(args) ? args : String(args).split(/\s+/).filter(Boolean);
+    try { const out = execFileSync(runner, [absPath, ...argv], { cwd: WS, timeout: 30000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); return { ok: true, out }; }
     catch (e) { return { ok: false, out: (e.stdout || '') + (e.stderr || '') }; }
 }
 const runNode = (re, args) => runFile(fileFor(re), 'node', args);
