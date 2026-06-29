@@ -40,14 +40,26 @@ function findFileDeep(root, basename, maxDepth = 4) {
     return null;
 }
 
-/** True if a non-empty file named `basename` exists within `maxDepth` levels. */
+/** True if a file named `basename` exists within `maxDepth` levels (any size). */
 function fileExistsDeep(root, basename, maxDepth = 4) {
     const rel = findFileDeep(root, basename, maxDepth);
     return !!rel;
+}
+
+// Files that are legitimately empty (existence is enough — matches completionGate.artifactExists).
+const EMPTY_OK = /(?:^|\/)(?:\.gitkeep|__init__\.py|py\.typed|\.nojekyll|\.gitignore)$/i;
+
+/** True only if a NON-EMPTY file named `basename` exists. Matches the completion gate's
+ *  required-artifact check, so the plan and the gate agree (a 0-byte README is NOT "done"). */
+function fileHasContentDeep(root, basename, maxDepth = 4) {
+    const rel = findFileDeep(root, basename, maxDepth);
+    if (!rel) return false;
+    if (EMPTY_OK.test(basename)) return true;
+    try { return fs.readFileSync(path.join(root, rel), 'utf8').trim().length > 0; } catch (e) { return false; }
 }
 
 function findIndexHtmlDeep(root, maxDepth = 4) {
     return findFileDeep(root, 'index.html', maxDepth);
 }
 
-module.exports = { findFileDeep, fileExistsDeep, findIndexHtmlDeep, SCAN_IGNORE: IGNORE };
+module.exports = { findFileDeep, fileExistsDeep, fileHasContentDeep, findIndexHtmlDeep, SCAN_IGNORE: IGNORE };

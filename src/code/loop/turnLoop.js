@@ -529,9 +529,28 @@ async function runTurnLoop(ctx) {
             session.projectRoot, session.goal, session.filesTouched
         );
         if (preBlockers.messages.some(m => /^\[DOM\]/i.test(m))) {
-            applyDomRepairIfNeeded(session, preBlockers.messages, { pushNudge: false });
+            // PUSH the repair instructions (once) so the model PATCHES the id mismatches instead
+            // of looping on reads. At the verify step it otherwise just "checks the state" turn
+            // after turn and never fixes the ids — burning the no-write budget. The nudge tells it
+            // exactly which getElementById id to rename.
+            applyDomRepairIfNeeded(session, preBlockers.messages, { pushNudge: true });
         } else if ((session.pendingDomRepairs || []).length) {
             refreshPendingDomRepairs(session); // read-only: clear if the model already fixed it
+        }
+        // Missing / empty required files (a 0-byte README, an unwritten linked script): tell the
+        // model to FINISH them now instead of re-reading the project to "verify". One-shot nudge.
+        const missingBlockers = preBlockers.messages.filter(m => /^\[(WEB|ARTIFACT)\]/i.test(m));
+        if (missingBlockers.length && !session._finishBlockerNudgeSent) {
+            session._finishBlockerNudgeSent = true;
+            session.messages.push({
+                role: 'system',
+                content: [
+                    '[HARNESS — FINISH THE BUILD] The app is not done yet — these are missing or empty:',
+                    ...missingBlockers.map(m => '  ' + m),
+                    'Stop reading and FIX them now: create or fill each file with COMPLETE working content (a 0-byte file does not count).',
+                    'Respond with write_file / patch tool calls only — do not re-read the project to "verify".'
+                ].join('\n')
+            });
         }
         // NOTE: DOM repair does NOT force write-only — the model needs read_file to find the
         // exact patch text in script.js. The repair nudge + the index.html-rewrite block guide it.
@@ -959,6 +978,38 @@ async function runTurnLoop(ctx) {
         if (result.finishReason === 'stop' && (!msg.tool_calls || !msg.tool_calls.length)) {
             continueLoop = false;
         }
+    }
+
+    // Continuation drive: if the run is ending INCOMPLETE but files were created, finish the
+    // remaining pieces with focused, minimal requests (assess what's missing/broken, then write
+    // each one with a tiny "just this file" prompt). The small prompt is fast and far less likely
+    // to stall than continuing the bloated conversation that just died — and it's deterministic
+    // and bounded. This is what turns "wrote index.html then stalled on script.js → incomplete"
+    // into a finished build.
+    if ((!finalGate || !finalGate.allow) && goalImpliesBuildWork(session.goal) && (session.filesTouched || []).length) {
+        try {
+            const { driveToCompletion } = require('./completionDrive.js');
+            const writeTools = selectToolsForTurn({
+                userPrompt: session.goal, turnIndex: 0, phase: 'implement',
+                writeOnly: true, pluginToolNames, pluginToolSchemas
+            });
+            const drive = await driveToCompletion({
+                session,
+                runValidation,
+                gateOpts: {
+                    planArtifacts: planArtifacts || session.planArtifacts,
+                    grindMode: false,
+                    projectMeta: session.projectMeta,
+                    runtimeVerify: execDeps && execDeps.runtimeVerify,
+                    changeLedger: execDeps && execDeps.changeLedger,
+                    sessionId: session.id
+                },
+                stream, apiBaseUrl, writeTools, signal, emit,
+                runTool: (name, args) => executeTool(name, args, { ...execDeps, sessionId: session.id, session, trace })
+            });
+            if (drive.gate) finalGate = drive.gate;
+            if (drive.completed) exitReason = null;
+        } catch (e) { /* non-fatal: keep the incomplete verdict */ }
     }
 
     await finalize(exitReason, finalGate);

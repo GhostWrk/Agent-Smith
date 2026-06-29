@@ -1,5 +1,20 @@
 # Agent Smith Changelog
 
+## [46.25.0] - 2026-06-29 — Code Mode: finish what it started (continuation drive + stuck-at-verify fixes)
+
+Code Mode only. Targets the real-world failure where Code Mode wrote some files, then stalled or looped at the verify step and ended INCOMPLETE (e.g. "wrote index.html, never wrote script.js" / "stuck at step 5 with DOM id mismatches and an empty README").
+
+### Added
+- **Continuation drive** (`completionDrive.js`): when a run would end incomplete but files were already created, the harness now assesses what's still missing/broken and FINISHES it with focused, minimal requests — write each missing file, then patch DOM id mismatches — re-checking after each. Each focused prompt is tiny (just the goal + the one file), so it's fast and far less likely to stall than continuing the bloated, already-stalling conversation. Deterministic and bounded; wired into the loop's single finalize point so it catches every give-up path (including stall-exhaustion).
+
+### Fixed
+- **Stuck at the verify step (read loop).** When the verify step was blocked by DOM id mismatches, the harness computed the fix but did NOT tell the model to apply it (`pushNudge:false`), so a model that reads "verify" as "go check the files" looped on reads and never patched — burning the no-write budget. It now PUSHES the precise repair instructions and a "finish the build — stop reading, write the missing/empty files" nudge so it patches instead of re-reading.
+- **Plan vs gate disagreement on README.** The plan marked an "Add README.md" step done on file EXISTENCE while the gate required CONTENT — so a 0-byte README showed "✓ step done" AND "README missing" at the same time. The plan's required-file checks are now content-aware (`fileHasContentDeep`), matching the gate.
+- **False stalls on slow hardware.** The between-token stream timeout was 60s; a model that doesn't fully fit in VRAM (offloading to CPU) can legitimately take longer per token, producing a false stall that killed a still-working build. Raised to 90s (override with `XK_CODE_STREAM_IDLE_MS`).
+
+Verified: +tests/completionDrive.test.js (4, incl. the exact stuck-at-verify scenario end-to-end with a mock model). Suite 575/575, harness-eval 10/10, harness-security 6/6. Live model verification of the drive is pending GPU availability (the box is training) — the logic is fully unit-covered.
+
+
 ## [46.24.1] - 2026-06-28 — Code Mode: stopping a run cancels an in-flight command
 
 ### Fixed

@@ -38,7 +38,11 @@ async function streamCompletion({
     // Between-token idle window (env-tunable). The FIRST token gets a more generous window
     // because heavy prompt-processing (large context + a big single write_file like script.js)
     // can legitimately take longer than the mid-stream gap before the model starts emitting.
-    inactivityTimeoutMs = Number(process.env.XK_CODE_STREAM_IDLE_MS) || 60000,
+    // Between-token window. 60s was too tight for a model that doesn't fully fit in VRAM and
+    // offloads layers to CPU — a single token can legitimately take longer than that, producing
+    // a FALSE stall that kills a still-working build. 90s is forgiving of slow hardware while
+    // still catching a genuine hang. Override with XK_CODE_STREAM_IDLE_MS.
+    inactivityTimeoutMs = Number(process.env.XK_CODE_STREAM_IDLE_MS) || 90000,
     firstTokenTimeoutMs = Number(process.env.XK_CODE_STREAM_FIRST_TOKEN_MS) || Math.max(inactivityTimeoutMs, 120000),
     constrain = false
 }) {

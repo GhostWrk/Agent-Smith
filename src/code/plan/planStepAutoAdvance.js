@@ -8,7 +8,7 @@ const fs = require('fs');
 const path = require('path');
 const wv = require('../governor/webValidators.js');
 const { advanceStep, currentStep } = require('./codePlan.js');
-const { fileExistsDeep } = require('../context/fileScan.js');
+const { fileExistsDeep, fileHasContentDeep } = require('../context/fileScan.js');
 
 function fileExists(projectRoot, name) {
     if (!projectRoot || !name) return false;
@@ -86,7 +86,7 @@ function planAllStepsDone(plan) {
  */
 function collectPlanBlockers(projectRoot, goal, filesTouched) {
     const messages = [];
-    if (goalRequiresReadme(goal) && !fileExists(projectRoot, 'README.md')) {
+    if (goalRequiresReadme(goal) && !fileHasContentDeep(projectRoot, 'README.md')) {
         messages.push('[ARTIFACT] README.md is required by the prompt but missing');
     }
     // Linked files index.html references but that don't exist on disk yet.
@@ -131,7 +131,7 @@ function isStepSatisfied(title, projectRoot, filesTouched, goal) {
         if (fileExists(projectRoot, 'script.js') || touchedMatches(touched, /\.(js|mjs|cjs)$/i)) return true;
     }
     if (/\breadme\.md\b|\breadme\b|\bdocumentation\b/.test(t)) {
-        if (fileExists(projectRoot, 'README.md')) return true;
+        if (fileHasContentDeep(projectRoot, 'README.md')) return true;
     }
 
     if (/create required files|html.*css.*js/i.test(t)) {
@@ -147,7 +147,7 @@ function isStepSatisfied(title, projectRoot, filesTouched, goal) {
     }
 
     if (/\bverif|\bpreview\b|\btest\b|\bfinal\b/i.test(t)) {
-        if (goalRequiresReadme(goal) && !fileExists(projectRoot, 'README.md')) return false;
+        if (goalRequiresReadme(goal) && !fileHasContentDeep(projectRoot, 'README.md')) return false;
         if (!fileExists(projectRoot, 'index.html') || !fileExists(projectRoot, 'script.js')) return false;
         if (!domContractClean(projectRoot)) return false;
         return true;
