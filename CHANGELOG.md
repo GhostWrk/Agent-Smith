@@ -1,5 +1,21 @@
 # Agent Smith Changelog
 
+## [46.27.0] - 2026-06-29 — Code Mode: target-locked repair (stop rewriting the correct index.html)
+
+Code Mode only — Agent and Chat mode unchanged.
+
+When the blocker said "the DOM mismatch is in script.js — index.html ids are correct, patch script.js", Code Mode still kept trying to rewrite index.html, got vetoed every time (so no write landed), and stopped INCOMPLETE on "no files written in 12 turns". The previous escalation told the model to "edit files" but never which file, so it picked the wrong one again.
+
+### Added
+- **Target-locked forced repair** (`htmlContract.buildForcedDomRepairNudge` + `turnLoop.js`): when validation is failing and the previous turn produced no SUCCESSFUL write, the harness now injects a repair instruction LOCKED to the file the blocker named (script.js): it forbids rewriting index.html, lists every wrong-id → right-id rename, lists the ids that actually EXIST in index.html (so a reference with no kebab/camel match — e.g. `file-input` → `import-input` — can be mapped), and tells the model to guard ids that have no HTML element. It ends with "Reply with ONE write_file or patch on script.js and NOTHING else."
+- **Wrong-file detection**: a BLOCKED write (e.g. trying to rewrite index.html during DOM repair) is recorded; the next forced instruction leads with "You tried to edit index.html, which is BLOCKED. The HTML ids are correct — the bug is in script.js."
+- **Forced-repair mode**: after 2 consecutive blocked/no-write repair turns it also drops read tools, so the next reply must be an edit of the named file.
+
+Unchanged guarantees: validation is never disabled or quieted; no HTML elements are fabricated; success still requires all linked files present + validation passing; if the model still can't patch, the final result names the exact unresolved file and selectors.
+
+Tests: +tests/codeRepairTargeting.test.js (target-lock instruction; Budget-Tracker DOM contract — patch JS not HTML; precise unresolved summary); updated the in-loop no-write test to assert the target-locked forced repair + forced-repair mode after 2 turns. Suite 580/580, harness-eval 10/10, harness-security 6/6. Agent/Chat mode files untouched.
+
+
 ## [46.26.0] - 2026-06-29 — Code Mode: convert validator failures into targeted repairs (no more no-write loops)
 
 Code Mode only — Agent and Chat mode unchanged.

@@ -139,6 +139,38 @@ function buildDomRepairNudge(session, gateMessages) {
 }
 
 /**
+ * FORCED, target-locked repair instruction. Names the exact file to patch (script.js), forbids the
+ * blocked file (index.html), lists every wrong-id -> right-id rename, AND lists the ids that
+ * actually exist in the HTML so the model can map references that have no kebab/camel "did you mean"
+ * (e.g. file-input -> import-input). Used when the model keeps trying to edit the wrong file or
+ * reasons without patching. Read-only (computes from disk).
+ */
+function buildForcedDomRepairNudge(session, gateMessages, opts = {}) {
+    const root = session?.projectRoot;
+    const scriptRel = findProjectScriptRel(root);
+    const fromDisk = collectDomRepairsFromDisk(root);
+    const repairs = fromDisk.length ? fromDisk : (gateMessages?.length ? parseDomGateItems(gateMessages) : []);
+    if (!scriptRel || !repairs.length) return '';
+    session.pendingDomRepairs = repairs;
+    const ids = extractHtmlElementIds(root, 'index.html');
+    const lines = [`[HARNESS — FORCED REPAIR — PATCH ${scriptRel} ONLY]`];
+    if (opts.blockedPath && /\.html?$/i.test(String(opts.blockedPath))) {
+        lines.push(`You tried to edit "${opts.blockedPath}", which is BLOCKED. The HTML ids are CORRECT — the bug is in ${scriptRel}.`);
+    }
+    lines.push(
+        `Do NOT rewrite index.html. Do NOT restate the plan. Do NOT just read. Patch ${scriptRel} so every getElementById/querySelector id matches an id that EXISTS in index.html:`
+    );
+    for (const { wrong, right } of repairs.slice(0, 14)) {
+        lines.push(right
+            ? `  getElementById('${wrong}') → getElementById('${right}')`
+            : `  '${wrong}' has NO matching element — rename it to the correct id below, or guard it: const el = document.getElementById('${wrong}'); if (el) { … }`);
+    }
+    if (ids.length) lines.push(`Ids that exist in index.html: ${ids.join(', ')}.`);
+    lines.push(`Reply with ONE write_file or patch on ${scriptRel} and NOTHING else.`);
+    return lines.join('\n');
+}
+
+/**
  * Safe guardrail (read-only check): while DOM mismatches are pending, the bug is in script.js
  * and the HTML ids are canonical — so block a rewrite of index.html (weak models loop on it).
  * Everything else (patch/rewrite script.js, read, explore) stays allowed — no hard repair "mode".
@@ -224,6 +256,7 @@ module.exports = {
     buildDomContractNudge,
     parseDomGateItems,
     buildDomRepairNudge,
+    buildForcedDomRepairNudge,
     checkDomRepairWrite,
     domContractClean,
     clearDomRepairsIfScriptPatched,

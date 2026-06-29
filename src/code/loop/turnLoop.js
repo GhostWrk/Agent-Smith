@@ -23,6 +23,7 @@ const {
 const {
     buildDomContractNudge,
     buildDomRepairNudge,
+    buildForcedDomRepairNudge,
     bootstrapDomRepair,
     refreshPendingDomRepairs
 } = require('../context/htmlContract.js');
@@ -564,14 +565,24 @@ async function runTurnLoop(ctx) {
         // list the fuller detail (incl. the [FUNCTIONAL]/[SMOKE]/[RUNTIME] from the last gate run).
         const freshBlockers = preBlockers.messages;
         const detailFailures = [...new Set([...freshBlockers, ...(session._lastGateMessages || [])])];
+        const domFailing = freshBlockers.some(m => /^\[DOM\]/i.test(m)) || (session.pendingDomRepairs || []).length > 0;
         let forceWriteRepair = false;
+        // Fire when validation is failing and the previous turn produced no SUCCESSFUL write —
+        // covers both "model only read" and "model tried the wrong file and got blocked".
         if (freshBlockers.length && !prevTurnWrote && session.turn > 1) {
             session._noWriteRepairTurns = (session._noWriteRepairTurns || 0) + 1;
             session.phase = 'implement';
+            // Forced-repair mode after 2 consecutive blocked/no-write repair turns: drop reads.
             forceWriteRepair = (session._noWriteRepairTurns >= 2);
+            // Target-lock the repair to the file the blocker named (script.js) so the model stops
+            // re-rewriting the (correct) index.html; name the wrong file it just tried, the exact
+            // renames, and the ids that actually exist. Fall back to a generic edit-now push.
+            const forced = domFailing
+                ? buildForcedDomRepairNudge(session, detailFailures, { blockedPath: session._lastBlockedWrite?.path })
+                : '';
             session.messages.push({
                 role: 'system',
-                content: [
+                content: forced || [
                     '[HARNESS — STOP. EDIT FILES NOW]',
                     'You did not edit any file last turn and the build still FAILS validation. Do NOT restate the plan, do NOT say you will continue, do NOT just read or inspect.',
                     'Apply the SMALLEST patch to fix these EXACT validator failures (rename the wrong id/selector to one that exists in the HTML, or create/fill the missing file):',
@@ -845,6 +856,14 @@ async function runTurnLoop(ctx) {
             if (WRITE_TOOLS.has(name) && ok) session.agentRanOkAfterEdit = false;
             if (ok && WRITE_TOOLS.has(name)) dedup.clearFailures();
             if (ok && WRITE_TOOLS.has(name)) session._turnHadEdit = true;
+            // Remember a BLOCKED write (e.g. the model tried to rewrite index.html while the DOM
+            // mismatch is in script.js) so the next turn can name the wrong file and force the
+            // correct target. A successful write clears it.
+            if (WRITE_TOOLS.has(name) && !ok && (toolResult.blockedReason || toolResult.error)) {
+                session._lastBlockedWrite = { path: args.path, blockedReason: toolResult.blockedReason || '' };
+            } else if (WRITE_TOOLS.has(name) && ok) {
+                delete session._lastBlockedWrite;
+            }
             dedup.recordResult(name, args, ok);
             qualityMonitor.record(name, ok, toolResult.error || toolResult.reason || toolResult.message);
             const stopCheck = earlyStop.onToolResult(ok, dup);

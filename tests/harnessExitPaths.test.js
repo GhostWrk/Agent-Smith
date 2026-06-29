@@ -138,21 +138,24 @@ test('a stalled Pac-Man repair turn falls back to harness recovery and completes
     assert.ok(events.some(e => e.type === 'harness_scaffold' && e.reason === 'acceptance_repair'));
 });
 
-test('a no-write repair turn while validation fails injects a forceful EDIT-NOW escalation', async () => {
+test('no-write repair turns force a TARGET-LOCKED repair (patch script.js, not the correct index.html)', async () => {
     // index.html has #import-input; script.js calls getElementById('file-input') (null deref).
-    // The model keeps "verifying" (no tool calls) — the harness must escalate to "edit files now".
+    // The model keeps "verifying" (no tool calls) — the harness must stop the loop and force a
+    // repair LOCKED to script.js (not let it keep choosing/rewriting the correct index.html).
     const root = tmp('exit-escalate-');
     fs.writeFileSync(path.join(root, 'index.html'),
         '<!doctype html><html><body><input id="import-input"><script src="script.js"></script></body></html>');
     fs.writeFileSync(path.join(root, 'script.js'),
         "document.getElementById('file-input').addEventListener('change', () => {});");
-    const session = mkSession({ projectRoot: root, goal: 'Build a web page with a file import input', filesTouched: ['index.html', 'script.js'] });
-    const { ctx } = ctxFor(session, async () => ({ message: { role: 'assistant', content: "I'll verify the current state and continue." }, finishReason: 'stop' }), { maxTurns: 6 });
+    const session = mkSession({ projectRoot: root, goal: 'Build a web app with a file import input', filesTouched: ['index.html', 'script.js'] });
+    const { ctx } = ctxFor(session, async () => ({ message: { role: 'assistant', content: "I'll verify the current state and continue." }, finishReason: 'stop' }), { maxTurns: 8 });
     await runTurnLoop(ctx);
 
-    const escalation = session.messages.find(m => typeof m.content === 'string' && /STOP\. EDIT FILES NOW/.test(m.content));
-    assert.ok(escalation, 'a forceful edit-now escalation was injected after a no-write repair turn');
-    assert.match(escalation.content, /file-input|FAILS validation/, 'it names the exact validator failure');
-    assert.match(escalation.content, /write_file or patch/, 'it demands a tool call, not more reading');
+    const forced = session.messages.find(m => typeof m.content === 'string' && /PATCH script\.js ONLY/.test(m.content));
+    assert.ok(forced, 'a target-locked forced-repair instruction was injected after a no-write repair turn');
+    assert.match(forced.content, /Do NOT rewrite index\.html/, 'forbids editing the correct HTML');
+    assert.match(forced.content, /import-input/, 'lists the real id the JS should use');
+    assert.match(forced.content, /write_file or patch on script\.js/, 'demands an edit of the named file');
+    assert.ok((session._noWriteRepairTurns || 0) >= 2, 'entered forced-repair mode after 2 consecutive no-write repair turns');
     fs.rmSync(root, { recursive: true, force: true });
 });
