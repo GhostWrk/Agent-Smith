@@ -210,6 +210,21 @@ test('pluginIntegrity hashPluginDir changes when a non-code asset changes', () =
     assert.notEqual(h1, h2, 'non-code asset change must alter the hash');
 });
 
+test('pluginIntegrity hashPluginDir includes dist, build, and node_modules assets', () => {
+    const { hashPluginDir } = require('../src/main/services/pluginIntegrity.js');
+    const dir = tmp();
+    fs.mkdirSync(path.join(dir, 'dist'), { recursive: true });
+    fs.mkdirSync(path.join(dir, 'build'), { recursive: true });
+    fs.mkdirSync(path.join(dir, 'node_modules', 'pkg'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'dist', 'bundle.js'), 'console.log(1);\n');
+    fs.writeFileSync(path.join(dir, 'build', 'asset.txt'), 'a\n');
+    fs.writeFileSync(path.join(dir, 'node_modules', 'pkg', 'index.js'), 'module.exports = 1;\n');
+    const h1 = hashPluginDir(dir);
+    fs.writeFileSync(path.join(dir, 'dist', 'bundle.js'), 'console.log(2);\n');
+    const h2 = hashPluginDir(dir);
+    assert.notEqual(h1, h2, 'dist asset must be hashed');
+});
+
 test('pluginIntegrity hashPluginDir throws when a file is unreadable', () => {
     const { hashPluginDir } = require('../src/main/services/pluginIntegrity.js');
     const dir = tmp();
@@ -257,10 +272,31 @@ test('pluginManager invokeTool fails closed when the sandbox throws (no in-proce
     assert.match(out, /sandbox/i, 'error mentions the sandbox');
 });
 
+test('pluginManager invokeTool fails closed when sandbox permissions are unavailable', async () => {
+    const PluginManager = require('../src/main/services/pluginManager.js');
+    const EXAMPLE = path.join(__dirname, '..', 'src', 'examples', 'plugins', 'hello');
+    const ud = tmp();
+    fs.mkdirSync(path.join(ud, 'plugins'), { recursive: true });
+    fs.cpSync(EXAMPLE, path.join(ud, 'plugins', 'hello'), { recursive: true });
+
+    const pm = new PluginManager(ud, {
+        sandbox: true,
+        sandboxImpl: {
+            permissionSupported: () => false,
+            runToolSandboxed: async () => 'should-not-run'
+        }
+    });
+    pm.discover();
+    pm.setEnabled('hello', true, ['log']);
+    const out = await pm.invokeTool('hello_echo', { text: 'hi' });
+    assert.match(out, /permission model is unavailable/i);
+});
+
 // ---- previewService: viewport clamping -------------------------------------
 
 test('previewService clampViewport clamps extreme/non-finite values', () => {
-    const { clampViewport, MIN_VIEWPORT_DIM, MAX_VIEWPORT_DIM } = require('../src/main/services/previewService.js');
+    const { clampViewport, DEFAULT_VIEWPORT, MIN_VIEWPORT_DIM, MAX_VIEWPORT_DIM } = require('../src/main/services/previewService.js');
+    assert.deepStrictEqual(clampViewport({ width: null, height: null }), DEFAULT_VIEWPORT, 'null dimensions use defaults');
     assert.equal(clampViewport({ width: 100000, height: 1 }).width, MAX_VIEWPORT_DIM);
     assert.equal(clampViewport({ width: 100000, height: 1 }).height, MIN_VIEWPORT_DIM);
     assert.equal(clampViewport({ width: -5, height: 0 }).width, MIN_VIEWPORT_DIM);
@@ -297,6 +333,23 @@ test('worktreeManager syncWorktreeFiles rejects ../ and absolute paths', () => {
     assert.equal(fs.existsSync(path.join(main, 'victim.txt')), false, 'nothing written outside main root');
 });
 
+test('worktreeManager syncWorktreeFiles refuses symlink escapes', () => {
+    const { syncWorktreeFiles } = require('../src/main/services/worktreeManager.js');
+    const main = tmp();
+    const wt = tmp();
+    const outside = tmp();
+    const secret = path.join(outside, 'secret.txt');
+    fs.writeFileSync(secret, 'stolen');
+    try {
+        fs.symlinkSync(secret, path.join(wt, 'link.txt'));
+    } catch (e) {
+        return; // symlink support unavailable on this platform
+    }
+    const r = syncWorktreeFiles(main, wt, ['link.txt']);
+    assert.ok(r.errors.some(e => /symlink escapes/i.test(e.error)), 'symlink escape rejected');
+    assert.equal(fs.existsSync(path.join(main, 'link.txt')), false, 'nothing copied from outside the worktree');
+});
+
 // ---- pluginInstaller: mutable HEAD refused without opt-in ------------------
 
 test('pluginInstaller install refuses a mutable git URL without allowMutable', async () => {
@@ -315,6 +368,48 @@ test('pluginInstaller install refuses a mutable GitHub tarball URL without allow
     const r = await inst.install('https://github.com/owner/repo');
     assert.ok(r.error, 'mutable branch tarball refused');
     assert.match(r.error, /mutable|immutable/i);
+});
+
+test('pluginInstaller install refuses a generic archive URL without allowMutable', async () => {
+    const PluginInstaller = require('../src/main/services/pluginInstaller.js');
+    const dir = tmp();
+    const inst = new PluginInstaller(path.join(dir, 'plugins'), { hasGit: false });
+    const r = await inst.install('https://example.com/archive.tar.gz');
+    assert.ok(r.error, 'generic archive rejected');
+    assert.match(r.error, /allowMutable/i);
+});
+
+test('pluginInstaller install does not treat non-boolean allowMutable as opt-in', async () => {
+    const PluginInstaller = require('../src/main/services/pluginInstaller.js');
+    const dir = tmp();
+    const inst = new PluginInstaller(path.join(dir, 'plugins'), { hasGit: false });
+    const r = await inst.install('https://github.com/owner/repo', { allowMutable: 1 });
+    assert.ok(r.error, 'only allowMutable === true should opt in');
+});
+
+test('pluginInstaller install fetches an immutable SHA ref correctly', async () => {
+    const PluginInstaller = require('../src/main/services/pluginInstaller.js');
+    const EXAMPLE = path.join(__dirname, '..', 'src', 'examples', 'plugins', 'hello');
+    const dir = tmp();
+    const calls = [];
+    const inst = new PluginInstaller(path.join(dir, 'plugins'), {
+        hasGit: true,
+        runGit: (args, cwd) => {
+            calls.push(args);
+            if (args[0] === 'init') {
+                fs.mkdirSync(path.join(cwd, 'repo'), { recursive: true });
+            }
+            if (args[0] === '-C' && args[1] === 'repo' && args[2] === 'fetch') {
+                fs.cpSync(EXAMPLE, path.join(cwd, 'repo'), { recursive: true });
+            }
+        }
+    });
+    const sha = '0123456789abcdef0123456789abcdef01234567';
+    const r = await inst.install(`https://github.com/example/hello.git#ref=${sha}`);
+    assert.equal(r.success, true);
+    assert.equal(r.immutable, true);
+    assert.equal(r.sourceRef, sha);
+    assert.ok(calls.some((args) => args.includes('fetch')), 'SHA ref was fetched, not cloned as a branch');
 });
 
 test('pluginInstaller install accepts a mutable URL with allowMutable', async () => {
@@ -350,4 +445,31 @@ test('previewRunner captureSource rejects a capture with no pending previewId', 
     const r = await runner.captureSource({ sourceId: 'screen:1' });
     assert.ok(r.error, 'capture without pending previewId rejected');
     assert.match(r.error, /pending/i);
+});
+
+test('previewRunner consumes previewId before a failed capture so it cannot be reused', async () => {
+    const previewService = require('../src/main/services/previewService.js');
+    const { createPreviewRunner } = require('../src/main/services/previewRunner.js');
+    const origCapture = previewService.captureDesktopSource;
+    previewService.captureDesktopSource = async () => ({ error: 'capture failed' });
+    try {
+        const runner = createPreviewRunner({
+            projectContext: { resolvePath: (p) => ({ path: p }) },
+            userDataPath: tmp(),
+            getMainWindow: () => null,
+            pushEvent: () => {},
+            getWebServerPort: () => 3000,
+            getLocalIP: () => '127.0.0.1',
+            isElectronDesktop: true,
+            getAllowDesktopPreview: () => true
+        });
+        const shown = await runner.show({ kind: 'screenshot' });
+        assert.ok(shown.pending, 'screenshot request created a pending preview');
+        const first = await runner.captureSource({ previewId: shown.previewId, sourceId: 'screen:1' });
+        assert.match(first.error, /capture failed/i);
+        const second = await runner.captureSource({ previewId: shown.previewId, sourceId: 'screen:1' });
+        assert.match(second.error, /No pending desktop capture/i);
+    } finally {
+        previewService.captureDesktopSource = origCapture;
+    }
 });

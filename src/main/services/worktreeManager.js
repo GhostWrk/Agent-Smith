@@ -7,6 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { execSync, execFileSync } = require('child_process');
+const WORKTREE_LIST_PREFIX = 'worktree ';
 
 function worktreeBase(projectRoot) {
     return path.join(projectRoot, '.agentsmith', 'worktrees');
@@ -68,9 +69,9 @@ function worktreeBranchMatches(projectRoot, wtPath, expectedBranch) {
         const blocks = String(out).split(/\n\n/);
         for (const block of blocks) {
             const lines = block.split('\n');
-            const wtLine = lines.find(l => l.startsWith('worktree '));
+            const wtLine = lines.find(l => l.startsWith(WORKTREE_LIST_PREFIX));
             const brLine = lines.find(l => l.startsWith('branch '));
-            if (wtLine && path.resolve(wtLine.slice('worktree '.length)) === path.resolve(wtPath)) {
+            if (wtLine && path.resolve(wtLine.slice(WORKTREE_LIST_PREFIX.length)) === path.resolve(wtPath)) {
                 if (!brLine) return false; // detached HEAD — not our branch
                 const br = brLine.slice('branch '.length).replace(/^refs\/heads\//, '');
                 return br === expectedBranch;
@@ -188,6 +189,8 @@ function cleanupMilestoneWorktree(projectRoot, parentSessionId, milestoneId) {
 function syncWorktreeFiles(mainRoot, worktreeRoot, relPaths) {
     const synced = [];
     const errors = [];
+    const realMainRoot = fs.realpathSync(mainRoot);
+    const realWorktreeRoot = fs.realpathSync(worktreeRoot);
     const isContained = (root, abs) => {
         const rel = path.relative(path.resolve(root), path.resolve(abs));
         return Boolean(rel) && !rel.startsWith('..') && !path.isAbsolute(rel);
@@ -201,11 +204,11 @@ function syncWorktreeFiles(mainRoot, worktreeRoot, relPaths) {
         }
         const src = path.join(worktreeRoot, normalized);
         const dst = path.join(mainRoot, normalized);
-        if (!isContained(worktreeRoot, src)) {
+        if (!isContained(realWorktreeRoot, src)) {
             errors.push({ path: normalized, error: 'source path escapes the worktree root' });
             continue;
         }
-        if (!isContained(mainRoot, dst)) {
+        if (!isContained(realMainRoot, dst)) {
             errors.push({ path: normalized, error: 'destination path escapes the main project root' });
             continue;
         }
@@ -214,8 +217,23 @@ function syncWorktreeFiles(mainRoot, worktreeRoot, relPaths) {
                 errors.push({ path: normalized, error: 'missing in worktree' });
                 continue;
             }
+            const srcStat = fs.lstatSync(src);
+            const realSrc = fs.realpathSync(src);
+            if (!isContained(realWorktreeRoot, realSrc)) {
+                errors.push({ path: normalized, error: 'source symlink escapes the worktree root' });
+                continue;
+            }
+            const targetStat = fs.statSync(realSrc);
+            if (!targetStat.isFile()) {
+                errors.push({ path: normalized, error: 'source path is not a file' });
+                continue;
+            }
+            if (!srcStat.isFile() && !srcStat.isSymbolicLink()) {
+                errors.push({ path: normalized, error: 'source path is not a regular file or symlink' });
+                continue;
+            }
             fs.mkdirSync(path.dirname(dst), { recursive: true });
-            fs.copyFileSync(src, dst);
+            fs.copyFileSync(realSrc, dst);
             synced.push(normalized);
         } catch (e) {
             errors.push({ path: normalized, error: e.message });

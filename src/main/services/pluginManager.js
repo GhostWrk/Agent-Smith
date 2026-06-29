@@ -341,11 +341,18 @@ class PluginManager {
         });
     }
 
+    _sandboxUnavailable() {
+        return this.sandbox && this._sandbox && typeof this._sandbox.permissionSupported === 'function' && !this._sandbox.permissionSupported();
+    }
+
     // ---- invocation --------------------------------------------------------
 
     async invokeTool(toolName, args) {
         const found = this._findToolOwner(toolName);
         if (!found) return `Error: no enabled plugin provides tool "${toolName}".`;
+        if (this._sandboxUnavailable()) {
+            return `Error: sandbox mode is enabled but the Node permission model is unavailable. Refusing to run plugin "${toolName}" in-process.`;
+        }
 
         // Opt-in: run in an OS-sandboxed child process (no child_process/worker, fs scoped
         // to the project root). When sandbox mode is enabled we FAIL CLOSED on any sandbox
@@ -409,6 +416,9 @@ class PluginManager {
             const cmd = plugin.commands.find((c) => c.name === name);
             if (!cmd) continue;
             if (typeof cmd.run === 'function') {
+                if (this._sandboxUnavailable()) {
+                    return `Error: sandbox mode is enabled but the Node permission model is unavailable. Refusing to run command "${name}" in-process.`;
+                }
                 // Route through the sandbox when enabled — commands are plugin code and
                 // must not bypass the opt-in isolation policy (previously they always
                 // ran in-process, so a malicious command could regain full privileges).
@@ -438,6 +448,9 @@ class PluginManager {
     /** Fire all hooks for an event. before* hooks may return {block,reason}. */
     async fireHook(event, payload) {
         let result = { blocked: false };
+        if (this._sandboxUnavailable()) {
+            return { blocked: true, reason: `sandbox mode is enabled but the Node permission model is unavailable. Refusing to run hook "${event}" in-process.`, by: 'sandbox' };
+        }
         for (const plugin of this.registry.values()) {
             if (!plugin.enabled || plugin.error) continue;
             for (const h of plugin.hooks) {

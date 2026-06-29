@@ -248,6 +248,9 @@ test('installer: resolveGithubTarball maps repo + branch and flags immutability'
     assert.deepStrictEqual(
         inst.resolveGithubTarball('https://github.com/owner/repo/tree/v1.0.0/tags/v1.0.0'),
         { url: 'https://codeload.github.com/owner/repo/tar.gz/refs/tags/v1.0.0', ref: 'v1.0.0', immutable: true });
+    assert.deepStrictEqual(
+        inst.resolveGithubTarball('https://github.com/owner/repo/releases/tag/v1.0.0'),
+        { url: 'https://codeload.github.com/owner/repo/tar.gz/refs/tags/v1.0.0', ref: 'v1.0.0', immutable: true });
     assert.strictEqual(inst.resolveGithubTarball('https://example.com/x'), null);
 });
 

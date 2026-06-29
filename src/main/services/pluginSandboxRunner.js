@@ -11,6 +11,7 @@
  */
 'use strict';
 
+const fs = require('fs');
 const path = require('path');
 
 const pending = new Map();
@@ -72,10 +73,13 @@ process.on('message', async (msg) => {
         const pluginDir = msg.pluginDir;
         const toolFile = msg.toolFile;
         if (!pluginDir || !toolFile) throw new Error('sandbox invoke missing pluginDir or toolFile');
-        const realPluginDir = path.resolve(pluginDir);
-        const realToolFile = path.resolve(toolFile);
+        fs.lstatSync(pluginDir);
+        fs.lstatSync(toolFile);
+        const realPluginDir = fs.realpathSync(pluginDir);
+        const realToolFile = fs.realpathSync(toolFile);
         const rel = path.relative(realPluginDir, realToolFile);
-        if (rel.startsWith('..') || path.isAbsolute(rel)) {
+        const relParts = rel.split(path.sep);
+        if (rel === '..' || rel.startsWith('..') || relParts.includes('..') || path.isAbsolute(rel)) {
             throw new Error(`tool file "${toolFile}" escapes plugin dir "${pluginDir}" — refusing to require`);
         }
         const host = buildHost(msg.grantedCaps, msg.projectRoot);

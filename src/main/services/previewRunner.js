@@ -155,6 +155,7 @@ function createPreviewRunner(deps) {
             pendingCaptures.delete(previewId);
             return { error: 'The pending desktop capture request expired. Request a new screenshot via preview({kind:"screenshot"}).' };
         }
+        pendingCaptures.delete(previewId);
 
         const cap = await previewService.captureDesktopSource(sourceId, {});
         if (cap.error) return { error: cap.error };
@@ -166,7 +167,6 @@ function createPreviewRunner(deps) {
             caption,
             sourceId
         });
-        pendingCaptures.delete(previewId);
 
         const { port, host, token } = hostPortToken(opts);
         const snapshotUrl = previewService.buildAssetUrl(host, port, saved.previewId, 'png', token);

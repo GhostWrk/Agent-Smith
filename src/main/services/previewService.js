@@ -21,11 +21,13 @@ function clampViewport(vp) {
     // explicit inputs that get clamped into range (a 0 or negative height clamps up
     // to MIN, rather than silently becoming the default 720 via a falsy || fallback).
     const num = (v, def) => {
+        if (v == null) return def;
         const n = Number(v);
         return Number.isFinite(n) ? n : def;
     };
-    const w = Math.max(MIN_VIEWPORT_DIM, Math.min(MAX_VIEWPORT_DIM, Math.floor(num(vp?.width, DEFAULT_VIEWPORT.width))));
-    const h = Math.max(MIN_VIEWPORT_DIM, Math.min(MAX_VIEWPORT_DIM, Math.floor(num(vp?.height, DEFAULT_VIEWPORT.height))));
+    const clampDimension = (value, defaultValue) => Math.max(MIN_VIEWPORT_DIM, Math.min(MAX_VIEWPORT_DIM, Math.floor(num(value, defaultValue))));
+    const w = clampDimension(vp?.width, DEFAULT_VIEWPORT.width);
+    const h = clampDimension(vp?.height, DEFAULT_VIEWPORT.height);
     return { width: w, height: h };
 }
 
@@ -98,7 +100,7 @@ async function captureWebUrl(targetUrl, viewport, deps) {
     const BrowserWindow = deps?.BrowserWindow || electron?.BrowserWindow;
     if (!BrowserWindow) return { error: 'Web capture requires Electron (not available in this environment).' };
 
-    const vp = clampViewport(Object.assign({}, DEFAULT_VIEWPORT, viewport || {}));
+    const vp = clampViewport(viewport);
     let win;
     try {
         win = new BrowserWindow({

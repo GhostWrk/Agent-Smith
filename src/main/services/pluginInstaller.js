@@ -93,17 +93,21 @@ class PluginInstaller {
         let ref = 'main';
         const treeIdx = parts.indexOf('tree');
         if (treeIdx >= 0 && parts[treeIdx + 1]) ref = parts[treeIdx + 1];
+        const tagIdx = parts.indexOf('tag');
+        const releasesIdx = parts.indexOf('releases');
+        if (tagIdx >= 0 && parts[tagIdx + 1]) ref = parts[tagIdx + 1];
+        if (releasesIdx >= 0 && parts[releasesIdx + 1] === 'tag' && parts[releasesIdx + 2]) ref = parts[releasesIdx + 2];
         // Immutable refs: a commit SHA (40 hex) or a tag always point at the same
         // bytes. A branch HEAD (main/master/develop) is mutable — a later push or a
         // TOCTOU update between review and install becomes trusted app code. Resolve
         // branch refs to the tag/commit form when possible; otherwise require an
         // explicit mutable-source opt-in.
         const isCommitSha = /^[0-9a-f]{40}$/i.test(ref);
-        const isTag = treeIdx >= 0 && parts[treeIdx + 2] === 'tags';
+        const isTagRef = (treeIdx >= 0 && parts[treeIdx + 2] === 'tags') || (releasesIdx >= 0 && parts[releasesIdx + 1] === 'tag' && parts[releasesIdx + 2]);
         if (isCommitSha) {
             return { url: `https://codeload.github.com/${owner}/${repo}/tar.gz/${ref}`, ref, immutable: true };
         }
-        if (isTag) {
+        if (isTagRef) {
             return { url: `https://codeload.github.com/${owner}/${repo}/tar.gz/refs/tags/${ref}`, ref, immutable: true };
         }
         return { url: `https://codeload.github.com/${owner}/${repo}/tar.gz/refs/heads/${ref}`, ref, immutable: false };
@@ -142,13 +146,14 @@ class PluginInstaller {
      *  By default refuses mutable branch-HEAD sources; pass { allowMutable: true } to
      *  accept a branch HEAD (recorded as mutable in the result). */
     async install(url, opts = {}) {
-        const allowMutable = !!opts.allowMutable;
+        const allowMutable = opts.allowMutable === true;
         const u = this.netGuard.validatePublicFetchTarget(url);
         // Allow scp-like git URLs (git@host:...) only when git is present; otherwise require http(s).
         const isScpGit = /^[^/]+@[^/]+:/.test(String(url));
         if (!u && !(isScpGit && this.hasGit)) {
             return { error: `URL rejected (must be http(s) to a non-internal host${this.hasGit ? ', or an ssh git URL' : ''})` };
         }
+        const isGitRepoUrl = isScpGit || /\.git(?:[#?]|$)/.test(String(url));
 
         const staging = this._mkStaging();
         const cleanup = () => { try { this.fs.rmSync(staging, { recursive: true, force: true }); } catch (e) {} };
@@ -156,34 +161,51 @@ class PluginInstaller {
         try {
             let sourceRef = null;
             let immutable = false;
-            if (this.hasGit && (isScpGit || /\.git$/.test(url) || (u && u.protocol.startsWith('http')))) {
-                // git clone defaults to the branch HEAD (mutable). Require an explicit
-                // ref (commit/tag) via a URL fragment or query, or an explicit mutable opt-in.
+            if (this.hasGit && isGitRepoUrl) {
+                const repoUrl = String(url).replace(/[#?].*$/, '');
                 const refMatch = String(url).match(/[#?]ref=([^&#?]+)/) || String(url).match(/@([0-9a-f]{40})/);
-                if (refMatch) {
-                    const ref = refMatch[1];
-                    this.runGit(['clone', '--depth', '1', '--branch', ref, url.replace(/[#?].*$/, ''), 'repo'], staging);
+                const ref = refMatch ? decodeURIComponent(refMatch[1]) : null;
+                if (ref) {
                     sourceRef = ref;
                     immutable = /^[0-9a-f]{40}$/i.test(ref);
+                    if (immutable) {
+                        const repoDir = this.path.join(staging, 'repo');
+                        this.fs.mkdirSync(repoDir, { recursive: true });
+                        this.runGit(['init', 'repo'], staging);
+                        this.runGit(['-C', 'repo', 'remote', 'add', 'origin', repoUrl], staging);
+                        this.runGit(['-C', 'repo', 'fetch', '--depth', '1', 'origin', ref], staging);
+                        this.runGit(['-C', 'repo', 'checkout', '--detach', 'FETCH_HEAD'], staging);
+                    } else if (allowMutable) {
+                        this.runGit(['clone', '--depth', '1', '--branch', ref, repoUrl, 'repo'], staging);
+                    } else {
+                        return { error: 'Refusing to install from a mutable branch HEAD without an immutable ref. Pin a commit SHA or tag (append #ref=<sha> or @<sha>), or pass { allowMutable: true } to accept mutable trusted code.' };
+                    }
                 } else if (allowMutable) {
-                    this.runGit(['clone', '--depth', '1', url, 'repo'], staging);
-                    immutable = false;
+                    this.runGit(['clone', '--depth', '1', repoUrl, 'repo'], staging);
                 } else {
                     return { error: 'Refusing to install from a mutable branch HEAD without an immutable ref. Pin a commit SHA or tag (append #ref=<sha> or @<sha>), or pass { allowMutable: true } to accept mutable trusted code.' };
                 }
             } else {
                 const resolved = this.resolveGithubTarball(url);
-                const tarball = resolved ? resolved.url : (u ? url : null);
-                if (!tarball) return { error: 'no git available and URL is not a GitHub repo or archive' };
-                if (resolved && !resolved.immutable && !allowMutable) {
-                    return { error: `Refusing to install from mutable branch "${resolved.ref}". Pin a commit SHA or tag URL (github.com/<owner>/<repo>/tree/<sha> or /tree/<tag>/tags/<tag>), or pass { allowMutable: true } to accept mutable trusted code.` };
+                if (resolved) {
+                    if (!resolved.immutable && !allowMutable) {
+                        return { error: `Refusing to install from mutable branch "${resolved.ref}". Pin a commit SHA or tag URL (github.com/<owner>/<repo>/tree/<sha> or /releases/tag/<tag>), or pass { allowMutable: true } to accept mutable trusted code.` };
+                    }
+                    sourceRef = resolved.ref;
+                    immutable = resolved.immutable;
+                    const archive = this.path.join(staging, 'archive.tar.gz');
+                    await this.download(resolved.url, archive);
+                    this.fs.mkdirSync(this.path.join(staging, 'repo'), { recursive: true });
+                    this.runTar(['-xzf', archive, '-C', 'repo'], staging);
+                } else {
+                    if (allowMutable !== true) {
+                        return { error: 'Refusing generic archive URLs unless { allowMutable: true } is set. Use a GitHub repo/tag URL or pin a commit SHA.' };
+                    }
+                    const archive = this.path.join(staging, 'archive.tar.gz');
+                    await this.download(url, archive);
+                    this.fs.mkdirSync(this.path.join(staging, 'repo'), { recursive: true });
+                    this.runTar(['-xzf', archive, '-C', 'repo'], staging);
                 }
-                sourceRef = resolved ? resolved.ref : null;
-                immutable = resolved ? resolved.immutable : false;
-                const archive = this.path.join(staging, 'archive.tar.gz');
-                await this.download(tarball, archive);
-                this.fs.mkdirSync(this.path.join(staging, 'repo'), { recursive: true });
-                this.runTar(['-xzf', archive, '-C', 'repo'], staging);
             }
 
             const root = this.findPluginRoot(this.path.join(staging, 'repo'));

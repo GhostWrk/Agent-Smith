@@ -113,11 +113,13 @@ class EditEngine {
         if (resolved.error) return { error: resolved.error };
         const absPath = resolved.path;
         let content;
+        let existed = true;
         try {
             content = await fsPromises.readFile(absPath, 'utf-8');
         } catch (e) {
             if (!opts.allowCreate) return { error: e.message };
             content = '';
+            existed = false;
         }
         // Normalize line endings + BOM for matching so an LF unified diff matches a
         // CRLF file (the Windows norm), then RESTORE the file's original EOL/BOM on
@@ -137,7 +139,7 @@ class EditEngine {
             let outBody = patched.content;
             if (isCRLF) outBody = outBody.replace(/\n/g, '\r\n');
             const finalContent = (hasBOM ? String.fromCharCode(0xFEFF) : '') + outBody;
-            if (content.length) {
+            if (existed) {
                 const snap = await this.ledger.snapshotBefore(planId, absPath, 'edit');
                 if (snap && snap.error) return { error: `Refusing to patch — could not snapshot the existing file for Revert All: ${snap.error}` };
             } else await this.ledger.recordCreate(planId, absPath);

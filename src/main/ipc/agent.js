@@ -223,11 +223,11 @@ module.exports = function registerAgentIpc(ipcMain, deps) {
             const absPath = resolved.path;
             const guard = assessPathMutation(absPath, 'delete');
             if (!guard.allowed) return blockedPathResult(absPath, guard.reason);
-            if (pid) {
+            const stats = await fsPromises.stat(absPath);
+            if (pid && stats.isFile()) {
                 const snap = await changeLedger.snapshotBefore(pid, absPath, 'delete');
                 if (snap && snap.error) return { error: `Refusing to delete — could not snapshot the existing file for Revert All: ${snap.error}` };
             }
-            const stats = await fsPromises.stat(absPath);
             // Capture content (small files) so a delete is undoable via the action log.
             let undo = null;
             if (stats.isDirectory()) {

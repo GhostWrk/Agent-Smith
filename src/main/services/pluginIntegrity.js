@@ -13,10 +13,9 @@
 
 const crypto = require('crypto');
 
-// Directories whose contents are bulky/generated and not part of the trusted
-// runtime surface. Everything else (templates, prompts, binaries, WASM, data
-// files, certs) is hashed because a plugin can read it at runtime.
-const IGNORE_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.cache']);
+// Hash every file reachable from the plugin root. Runtime assets in dist/build/
+// node_modules/ are part of the trusted surface because plugin code can read them.
+const IGNORE_DIRS = new Set();
 
 function walk(dir, fs, path, base, out) {
     let entries = [];
