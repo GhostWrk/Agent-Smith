@@ -50,6 +50,20 @@ test('persistence is required ONLY when the goal asks to save', () => {
     assert.ok(!failedIds(acc('budget tracker web app', '<button id="b"></button><div id="l"></div>', noStore)).includes('persistence'));
 });
 
+test('score diagnostic ignores initialization-only score shells', () => {
+    const html = '<div id="score">Score: 0</div><button id="start">Start</button>';
+    const js = 'let score = 0; start.addEventListener("click",()=>{game.textContent="playing"});';
+    const score = acc('Build a game', html, js).checks.find(c => c.id === 'score');
+    assert.equal(score.present, false);
+});
+
+test('score diagnostic accepts runtime mutation plus score render', () => {
+    const html = '<div id="score">Score: 0</div><button id="start">Start</button>';
+    const js = 'let score = 0; start.addEventListener("click",()=>{score += 10; scoreEl.textContent = `Score: ${score}`;});';
+    const score = acc('Build a game', html, js).checks.find(c => c.id === 'score');
+    assert.equal(score.present, true);
+});
+
 test('static page is NOT subject to acceptance (no false positive)', () => {
     assert.equal(acc('Build a landing page website', '<h1>Hi</h1>', '').applicable, false);
 });

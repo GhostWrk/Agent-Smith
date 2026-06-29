@@ -115,6 +115,11 @@ function readSafe(abs) {
     try { return fs.readFileSync(abs, 'utf-8'); } catch (e) { return null; }
 }
 
+function isInsideProjectRoot(projectRoot, abs) {
+    const rel = path.relative(path.resolve(projectRoot), path.resolve(abs));
+    return rel === '' || !!rel && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
 /**
  * Full validation pass over the project. Returns a structured report; pure w.r.t. the
  * model (reads disk only). This is the single source of truth for "is it done?".
@@ -260,13 +265,17 @@ async function runValidation(projectRoot, filesTouched, goal, opts = {}) {
             if (/^https?:\/\//i.test(ref)) continue;
             ranChecks++;
             const refAbs = path.resolve(htmlDir, ref.replace(/^\.\//, ''));
+            const refRel = path.relative(projectRoot, refAbs).split(path.sep).join('/');
+            if (!isInsideProjectRoot(projectRoot, refAbs)) {
+                messages.push(`[WEB] ${htmlRel} references "${ref}" outside the project root (${refRel})`);
+                continue;
+            }
             if (!fs.existsSync(refAbs)) {
                 // Report the path RELATIVE TO PROJECT ROOT, not the bare href. When
                 // index.html lives in a subdir (e.g. pacman/index.html → "script.js"),
                 // the file must be created at pacman/script.js. Telling the model to
                 // create bare "script.js" makes it write to the root, leaving the
                 // reference missing forever (an infinite reflection loop).
-                const refRel = path.relative(projectRoot, refAbs).split(path.sep).join('/');
                 messages.push(`[WEB] ${htmlRel} references "${ref}" — create the file at ${refRel} (it is missing on disk)`);
                 missingRefs.push(refRel);
             }
@@ -275,8 +284,14 @@ async function runValidation(projectRoot, filesTouched, goal, opts = {}) {
         // gather css/js bodies (referenced + touched)
         const cssAbs = new Set();
         const jsAbs = new Set();
-        for (const ref of styles) if (!/^https?:\/\//i.test(ref)) cssAbs.add(path.resolve(htmlDir, ref.replace(/^\.\//, '')));
-        for (const ref of scripts) if (!/^https?:\/\//i.test(ref)) jsAbs.add(path.resolve(htmlDir, ref.replace(/^\.\//, '')));
+        for (const ref of styles) if (!/^https?:\/\//i.test(ref)) {
+            const abs = path.resolve(htmlDir, ref.replace(/^\.\//, ''));
+            if (isInsideProjectRoot(projectRoot, abs)) cssAbs.add(abs);
+        }
+        for (const ref of scripts) if (!/^https?:\/\//i.test(ref)) {
+            const abs = path.resolve(htmlDir, ref.replace(/^\.\//, ''));
+            if (isInsideProjectRoot(projectRoot, abs)) jsAbs.add(abs);
+        }
         for (const rel of files) {
             const abs = path.join(projectRoot, rel);
             if (rel.toLowerCase().endsWith('.css')) cssAbs.add(abs);
@@ -386,7 +401,7 @@ async function runValidation(projectRoot, filesTouched, goal, opts = {}) {
     const planMsg = await runPlanTestVerify(projectRoot, opts.planArtifacts);
     if (planMsg) messages.push(planMsg);
 
-    const rulesResult = await runProjectRulesForProject(projectRoot, filesTouched);
+    const rulesResult = await runProjectRulesForProject(projectRoot, filesTouched, { enabled: opts.projectRulesEnabled });
     if (!rulesResult.ok) {
         ranChecks++;
         messages.push(...rulesResult.messages);

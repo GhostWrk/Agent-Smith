@@ -46,7 +46,7 @@ module.exports = {
 };
 `);
     fs.writeFileSync(path.join(root, 'file.js'), 'const MARKER = 1;\n');
-    const sensor = await runPostEditChecks(root, 'file.js', {}, {});
+    const sensor = await runPostEditChecks(root, 'file.js', {}, { projectRulesEnabled: true });
     assert.ok(sensor.warnings.length > 0);
 });
 
@@ -105,7 +105,7 @@ module.exports = {
 };
 `);
     fs.writeFileSync(path.join(root, 'x.js'), 'x();\n');
-    const r = await runValidation(root, ['x.js'], 'task', { grindMode: false });
+    const r = await runValidation(root, ['x.js'], 'task', { grindMode: false, projectRulesEnabled: true });
     assert.equal(r.allow, false);
     assert.ok(r.messages.some(m => /\[RULE:r1\]/.test(m)));
 });

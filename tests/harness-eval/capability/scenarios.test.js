@@ -50,13 +50,13 @@ module.exports = {
 };
 `);
     fs.writeFileSync(path.join(root, 'f.js'), 'ok();\n');
-    const sensor = await runPostEditChecks(root, 'f.js', {}, {});
+    const sensor = await runPostEditChecks(root, 'f.js', {}, { projectRulesEnabled: true });
     assert.ok(sensor.warnings.some(w => /\[RULE:warn\]/.test(w)));
 });
 
 test('capability-early-stop prevents runaway turns', () => {
     const es = new EarlyStopDetector({ maxTurns: 5 });
-    for (let i = 0; i < 4; i++) es.onTurn();
+    for (let i = 0; i < 5; i++) assert.equal(es.onTurn().stop, false);
     const r = es.onTurn();
     assert.equal(r.stop, true);
 });

@@ -13,7 +13,7 @@ function execCheck(cmd, timeout = 20000) {
             if (!error) return resolve({ ran: true, ok: true });
             const raw = (stderr || stdout || error.message || '').toString();
             // Tool not installed → treat as "couldn't check", never as a failure.
-            if (error.code === 127 || /is not recognized|not recognized as|command not found|ENOENT|No such file/i.test(raw)) {
+            if (error.code === 127 || /is not recognized|not recognized as|command not found|ENOENT|No such file|Microsoft Store|App-Ausf.hrungsaliase|App Execution Aliases|Python was not found/i.test(raw)) {
                 return resolve({ ran: false });
             }
             if (error.killed) return resolve({ ran: true, ok: false, message: 'check timed out', raw });
@@ -56,7 +56,7 @@ async function syntaxCheckFile(projectRoot, relPath) {
         '.js': [`node --check ${q}`],
         '.cjs': [`node --check ${q}`],
         '.mjs': [`node --check ${q}`],
-        '.py': [`python -m py_compile ${q}`, `python3 -m py_compile ${q}`],
+        '.py': [`python -m py_compile ${q}`, `py -3 -m py_compile ${q}`, `python3 -m py_compile ${q}`],
         '.go': [`gofmt -e ${q}`],
         '.rb': [`ruby -c ${q}`],
         '.php': [`php -l ${q}`],

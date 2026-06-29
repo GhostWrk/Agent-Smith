@@ -8,16 +8,25 @@ const path = require('path');
 
 const cache = new Map();
 
+function projectRulesEnabled(opts = {}) {
+    return opts.enabled === true || process.env.AGENT_SMITH_ENABLE_PROJECT_RULES === '1';
+}
+
 function rulesDir(projectRoot) {
     return path.join(projectRoot, '.agentsmith', 'rules');
 }
 
-function loadRules(projectRoot) {
-    const key = projectRoot;
+function loadRules(projectRoot, opts = {}) {
+    const enabled = projectRulesEnabled(opts);
+    const key = `${projectRoot}:${enabled ? 'enabled' : 'disabled'}`;
     if (cache.has(key)) return cache.get(key);
 
     const dir = rulesDir(projectRoot);
     const rules = [];
+    if (!enabled) {
+        cache.set(key, rules);
+        return rules;
+    }
     if (!fs.existsSync(dir)) {
         cache.set(key, rules);
         return rules;
@@ -50,8 +59,10 @@ function loadRules(projectRoot) {
 }
 
 function clearRulesCache(projectRoot) {
-    if (projectRoot) cache.delete(projectRoot);
-    else cache.clear();
+    if (projectRoot) {
+        cache.delete(`${projectRoot}:enabled`);
+        cache.delete(`${projectRoot}:disabled`);
+    } else cache.clear();
 }
 
 async function readFileContent(projectRoot, relPath) {
@@ -63,7 +74,7 @@ async function readFileContent(projectRoot, relPath) {
 }
 
 async function runProjectRulesForFile(projectRoot, relPath, opts = {}) {
-    const rules = loadRules(projectRoot);
+    const rules = loadRules(projectRoot, opts);
     const violations = [];
     const content = await readFileContent(projectRoot, relPath);
     if (content == null) return { violations, ok: true };
@@ -97,11 +108,11 @@ async function runProjectRulesForFile(projectRoot, relPath, opts = {}) {
     return { violations, ok: violations.length === 0 };
 }
 
-async function runProjectRulesForProject(projectRoot, filesTouched) {
+async function runProjectRulesForProject(projectRoot, filesTouched, opts = {}) {
     const files = [...new Set((filesTouched || []).filter(Boolean))];
     const violations = [];
     for (const rel of files) {
-        const r = await runProjectRulesForFile(projectRoot, rel, { advisory: false });
+        const r = await runProjectRulesForFile(projectRoot, rel, { ...opts, advisory: false });
         violations.push(...r.violations);
     }
     return {
@@ -116,6 +127,7 @@ async function runProjectRulesForProject(projectRoot, filesTouched) {
 
 module.exports = {
     loadRules,
+    projectRulesEnabled,
     clearRulesCache,
     runProjectRulesForFile,
     runProjectRulesForProject,
