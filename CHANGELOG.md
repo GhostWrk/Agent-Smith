@@ -1,5 +1,22 @@
 # Agent Smith Changelog
 
+## [46.28.0] - 2026-06-29 — Code Mode: visual game verification (a blank preview can no longer pass)
+
+Code Mode only — Agent and Chat mode unchanged; game acceptance for game prompts is kept.
+
+A Mega Man-style game could report "acceptance passed / smoke executed without errors / all checks passed" while the preview was blank/white. Root cause: the vm smoke runs scripts against a STUB canvas whose draw calls no-op, and the real-browser runtime check only looked for JS errors/404s — neither confirms anything actually RENDERED. So a game that draws nothing (or draws to a zero-size / off-screen / blank canvas) passed.
+
+### Added
+- **Visual render probe** (`src/code/governor/visualProbe.js`): runs in the REAL browser the runtime check already loads (Electron in-app, Puppeteer in tests). It inspects the live page — every canvas's dimensions and whether its pixels are non-blank (getImageData), plus whether there is visible DOM UI besides the canvas — and `analyzeVisual` turns it into a verdict.
+- **[VISUAL] gate failure**: the completion gate now tells the runtime check whether the goal is a GAME, and surfaces visual failures as `[VISUAL] Preview appears blank; game UI/canvas did not render visible content.` (or "the game canvas has zero size"). A game must render a non-blank canvas OR visible UI to pass; a visible start screen counts (click-to-start games still pass). Non-game pages are checked only for a blank/white body. Fail-open when no real browser is available (never blocks on missing infra), so existing flows are unaffected.
+
+The runtime check serves a FRESH copy each run (new HTTP server + page load), so verification is never stale — a re-check after writing reflects the new files (tested).
+
+Unchanged: game acceptance still applies to explicit game prompts; non-game web-app acceptance is untouched; validation is not disabled or quieted; no HTML elements are fabricated.
+
+Tests: +tests/visualVerify.test.js (9): Mega Man prompt uses game acceptance; non-game acceptance unaffected; analyzeVisual blank/zero-size fails + drawn/start-screen passes + fail-open; the gate emits [VISUAL]; and a real-browser (Puppeteer) test proving a blank game FAILS, a drawing game PASSES, and a re-check reflects new files (not stale). Suite 589/589, harness-eval 10/10, harness-security 6/6, build:renderer OK.
+
+
 ## [46.27.0] - 2026-06-29 — Code Mode: target-locked repair (stop rewriting the correct index.html)
 
 Code Mode only — Agent and Chat mode unchanged.

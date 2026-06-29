@@ -10,6 +10,7 @@ let BrowserWindow = null;
 try { ({ BrowserWindow } = require('electron')); } catch (e) { /* not in Electron */ }
 
 const { serveAndCheck } = require('../../code/governor/runtimeVerify.js');
+const { VISUAL_PROBE_SRC } = require('../../code/governor/visualProbe.js');
 
 // console-message levels: 0 verbose, 1 info, 2 warning, 3 error. Block only on real errors.
 const ERROR_LEVEL = 3;
@@ -22,6 +23,7 @@ const IGNORE = [
 async function electronBrowserCheck(url, opts = {}) {
     if (!BrowserWindow) return { errors: [] }; // not in Electron -> skip (fail-open upstream)
     const errors = [];
+    let visual = null;
     let win = null;
     try {
         win = new BrowserWindow({
@@ -47,20 +49,22 @@ async function electronBrowserCheck(url, opts = {}) {
             win.loadURL(url).catch(() => { clearTimeout(timer); resolve(); });
         });
         await new Promise(r => setTimeout(r, 300)); // let late errors surface
+        // Visual render probe — did the page actually show anything (game canvas / visible UI)?
+        try { visual = await win.webContents.executeJavaScript(VISUAL_PROBE_SRC, true); } catch (e) { visual = null; }
     } catch (e) {
         return { errors: [] }; // fail-open
     } finally {
         try { if (win && !win.isDestroyed()) win.destroy(); } catch (e) { /* ignore */ }
     }
-    return { errors };
+    return { errors, visual };
 }
 
-/** runtimeVerify(projectRoot, htmlRel) for the completion gate — serve + Electron check. */
-async function runtimeVerify(projectRoot, htmlRel) {
+/** runtimeVerify(projectRoot, htmlRel, opts) for the completion gate — serve + Electron check. */
+async function runtimeVerify(projectRoot, htmlRel, opts = {}) {
     if (process.env.XK_CODE_NO_RUNTIME_VERIFY === '1' || !BrowserWindow) {
         return { ok: true, skipped: true, errors: [] };
     }
-    return serveAndCheck(projectRoot, htmlRel, electronBrowserCheck);
+    return serveAndCheck(projectRoot, htmlRel, electronBrowserCheck, opts);
 }
 
 module.exports = { runtimeVerify, electronBrowserCheck };

@@ -363,10 +363,15 @@ async function runValidation(projectRoot, filesTouched, goal, opts = {}) {
         // instead of the gate falsely passing an app that doesn't run. Fail-open on infra error.
         if (typeof opts.runtimeVerify === 'function') {
             try {
-                const rt = await opts.runtimeVerify(projectRoot, htmlRel);
+                // Tell the runtime check whether this is a GAME so it can require a non-blank
+                // canvas / visible UI (a game that draws nothing must NOT pass).
+                const rt = await opts.runtimeVerify(projectRoot, htmlRel, { isGame: goalIsGame(goal) });
                 if (rt && !rt.skipped) {
                     ranChecks++;
-                    if (!rt.ok) for (const e of (rt.errors || [])) messages.push(`[RUNTIME] ${e}`);
+                    if (!rt.ok) {
+                        for (const e of (rt.errors || [])) messages.push(`[RUNTIME] ${e}`);
+                        for (const e of (rt.visualErrors || [])) messages.push(`[VISUAL] ${e}`);
+                    }
                 }
             } catch (e) { /* non-fatal */ }
         }

@@ -67,11 +67,15 @@ async function serveAndCheck(projectRoot, htmlRel, browserCheck, opts = {}) {
     const rel = String(htmlRel || 'index.html').split(path.sep).join('/').replace(/^\.?\//, '');
     const url = `http://127.0.0.1:${port}/${rel}`;
     try {
-        const result = await browserCheck(url, { timeoutMs: opts.timeoutMs || 8000 });
+        const result = await browserCheck(url, { timeoutMs: opts.timeoutMs || 8000, isGame: !!opts.isGame });
         const errors = dedupe((result && result.errors) || []);
-        return { ok: errors.length === 0, errors, url };
+        // Visual render verdict: the page must actually SHOW something — a game must render a
+        // non-blank canvas or visible UI. Fail-open when the probe is unavailable (no errors).
+        const { analyzeVisual } = require('./visualProbe.js');
+        const visualErrors = dedupe(analyzeVisual(result && result.visual, { isGame: !!opts.isGame }).errors);
+        return { ok: errors.length === 0 && visualErrors.length === 0, errors, visualErrors, url };
     } catch (e) {
-        return { ok: true, skipped: true, errors: [], reason: e && e.message };
+        return { ok: true, skipped: true, errors: [], visualErrors: [], reason: e && e.message };
     } finally {
         try { server.close(); } catch (e) { /* ignore */ }
     }
