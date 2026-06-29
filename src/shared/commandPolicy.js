@@ -9,11 +9,57 @@
  */
 'use strict';
 
-// Each rule: { re, reason }. Matched case-insensitively against the normalized command.
+// Root-ish destruction targets. Tokens are compared after stripping surrounding
+// quotes and lowercasing so `'/'`, `"/"`, and `$HOME` all normalize here.
+const ROOT_TARGETS = new Set(['/', '/.', '/*', '~', '~/', '$home', '${home}', '$env:userprofile']);
+
+function stripQuotes(tok) {
+    return tok.replace(/^['"]+|['"]+$/g, '');
+}
+function isRootTarget(tok) {
+    return ROOT_TARGETS.has(stripQuotes(tok).toLowerCase());
+}
+function isOption(tok) {
+    return tok.startsWith('-');
+}
+// A recursive flag in any short cluster (-rf, -fr, -Rf) or GNU long form (--recursive).
+function isRecursiveFlag(tok) {
+    return /^--recursive$/i.test(tok) || /^-[a-z]*r[a-z]*$/i.test(tok);
+}
+
+// Split a command line into separate invocations on shell separators so a chained
+// `cd /tmp && rm -rf /` is inspected as two independent segments.
+function commandSegments(cmd) {
+    return cmd.split(/(?:&&|\|\||[;|&\n])/);
+}
+
+// Generic destructive-root matcher: does any invocation of `name` carry a recursive
+// flag AND target a root/home path? Tolerant of long options (incl.
+// `--no-preserve-root`) appearing before or after the target. This replaces the
+// position-sensitive regexes that GNU long options could slip past.
+function recursiveRootCommand(cmd, name) {
+    const nameRe = new RegExp(`^${name}$`, 'i');
+    for (const seg of commandSegments(cmd)) {
+        const toks = seg.trim().split(/\s+/).filter(Boolean);
+        const idx = toks.findIndex(t => nameRe.test(t));
+        if (idx === -1) continue;
+        const rest = toks.slice(idx + 1);
+        const hasRecursive = rest.some(isRecursiveFlag);
+        const hasRootTarget = rest.some(t => !isOption(t) && isRootTarget(t));
+        if (hasRecursive && hasRootTarget) return true;
+    }
+    return false;
+}
+
+// Each rule: { re, reason } (regex against the normalized command) or
+// { test, reason } (predicate over the normalized command). Matched
+// case-insensitively. The first matching rule blocks the command.
 const RULES = [
-    // Recursive force-delete of a root / home / wildcard root
-    { re: /\brm\s+(?:-[a-z]*\s+)*-?[a-z]*r[a-z]*f?[a-z]*\b[^\n]*\s(?:\/|~|\/\*|\$HOME|\$\{HOME\})(?:\s|$)/i, reason: 'recursive delete of a root/home directory' },
-    { re: /\brm\s+-[rf]+\s+\/(?:\s|$)/i, reason: 'rm -rf /' },
+    // Recursive force-delete / chmod / chown of a root / home / wildcard root.
+    // Token-based so long options like `--no-preserve-root` / `--recursive` can't bypass.
+    { test: (c) => recursiveRootCommand(c, 'rm'), reason: 'recursive delete of a root/home directory' },
+    { test: (c) => recursiveRootCommand(c, 'chmod'), reason: 'recursive chmod of a root/home directory' },
+    { test: (c) => recursiveRootCommand(c, 'chown'), reason: 'recursive chown of a root/home directory' },
     // Windows mass delete / format
     { re: /\b(?:del|erase)\b[^\n]*\/[sq][^\n]*[a-z]:\\/i, reason: 'recursive Windows delete of a drive root' },
     { re: /\b(?:rd|rmdir)\b[^\n]*\/s[^\n]*[a-z]:\\?/i, reason: 'recursive Windows directory removal of a drive' },
@@ -23,9 +69,6 @@ const RULES = [
     { re: /\bmkfs(\.\w+)?\b/i, reason: 'filesystem creation (mkfs)' },
     { re: /\bdd\b[^\n]*\bof=\/dev\/(sd|nvme|disk|hd|vd)/i, reason: 'dd writing to a raw disk device' },
     { re: />\s*\/dev\/(sd|nvme|disk|hd|vd)/i, reason: 'redirect into a raw disk device' },
-    // Permission/ownership nukes on root
-    { re: /\bchmod\s+-R\s+[0-7]{3,4}\s+\/(?:\s|$)/i, reason: 'recursive chmod of /' },
-    { re: /\bchown\s+-R\b[^\n]*\s\/(?:\s|$)/i, reason: 'recursive chown of /' },
     // Fork bomb
     { re: /:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/, reason: 'fork bomb' },
     // Pull-and-execute straight from the internet — pipe to interpreter
@@ -45,7 +88,8 @@ function assessCommand(command) {
     const cmd = String(command || '').replace(/\s+/g, ' ').trim();
     if (!cmd) return { allowed: true };
     for (const rule of RULES) {
-        if (rule.re.test(cmd)) return { allowed: false, reason: rule.reason };
+        const matched = rule.re ? rule.re.test(cmd) : rule.test(cmd);
+        if (matched) return { allowed: false, reason: rule.reason };
     }
     return { allowed: true };
 }

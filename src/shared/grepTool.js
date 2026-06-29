@@ -1,7 +1,7 @@
 const { spawn, execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { loadIgnoreFile, isIgnored } = require('./ignoreFilter.js');
+const { loadIgnoreFile, isIgnored, DEFAULT_IGNORE } = require('./ignoreFilter.js');
 
 const MAX_HITS = 200;
 
@@ -21,9 +21,19 @@ function hasRipgrep() {
 
 function grepWithRg(projectRoot, pattern, opts = {}) {
     return new Promise((resolve) => {
-        const args = ['--json', '--max-count', String(opts.maxHits || MAX_HITS), '-e', pattern];
+        // Mirror the Node fallback's ignore semantics: rg has no knowledge of our
+        // DEFAULT_IGNORE list or `.xkaliberignore`, so without this it would surface
+        // files that globFiles/list_project/grepNode intentionally hide (secrets,
+        // generated artifacts). We exclude the default dirs up front and post-filter
+        // every hit through isIgnored so both backends behave identically.
+        const ig = loadIgnoreFile(projectRoot);
+        const maxHits = opts.maxHits || MAX_HITS;
+        const args = ['--json', '--max-count', String(maxHits), '-e', pattern];
         if (opts.caseInsensitive) args.push('-i');
         if (opts.glob) args.push('--glob', opts.glob);
+        const xkaliberignore = path.join(projectRoot, '.xkaliberignore');
+        if (fs.existsSync(xkaliberignore)) args.push('--ignore-file', xkaliberignore);
+        for (const dir of DEFAULT_IGNORE) args.push('--glob', `!${dir}/`);
         const searchPath = opts.subpath ? path.join(projectRoot, opts.subpath) : projectRoot;
         args.push(searchPath);
 
@@ -36,10 +46,12 @@ function grepWithRg(projectRoot, pattern, opts = {}) {
             const hits = [];
             for (const line of stdout.split('\n')) {
                 if (!line.trim()) continue;
+                if (hits.length >= maxHits) break;
                 try {
                     const j = JSON.parse(line);
                     if (j.type === 'match' && j.data) {
                         const rel = path.relative(projectRoot, j.data.path.text).replace(/\\/g, '/');
+                        if (isIgnored(ig, rel)) continue;
                         hits.push({
                             file: rel,
                             line: j.data.line_number,
@@ -48,7 +60,7 @@ function grepWithRg(projectRoot, pattern, opts = {}) {
                     }
                 } catch (e) { /* skip */ }
             }
-            resolve({ hits, backend: 'rg', truncated: hits.length >= MAX_HITS, stderr: stderr || null });
+            resolve({ hits, backend: 'rg', truncated: hits.length >= maxHits, stderr: stderr || null });
         });
         child.on('error', () => resolve({ error: 'rg failed to start', hits: [] }));
     });
