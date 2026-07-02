@@ -12,8 +12,8 @@ const ARTIFACT_DIR = '.agentsmith';
 const PLAN_FILE = 'PLAN.md';
 const IMPLEMENT_FILE = 'IMPLEMENT.md';
 
-const MILESTONE_RE = /^-\s*\[([ xX])\]\s*\*\*(M\d+|Final)[^*]*\*\*[^|]*\|\s*verify:\s*`([^`]+)`/gm;
-const MILESTONE_E2E_RE = /^-\s*\[([ xX])\]\s*\*\*(M\d+|Final)[^*]*\*\*[^|]*\|\s*e2e:\s*`([^`]+)`/gm;
+const MILESTONE_RE = /^-\s*\[([ xX])\]\s*\*\*(M\d+|Final)[^*]*\*\*.*?(?:\||—)\s*verify:\s*`([^`]+)`/gm;
+const MILESTONE_E2E_RE = /^-\s*\[([ xX])\]\s*\*\*(M\d+|Final)[^*]*\*\*.*?(?:\||—)\s*e2e:\s*`([^`]+)`/gm;
 const MILESTONE_SIMPLE = /^-\s*\[([ xX])\]\s*\*\*(M\d+|Final)/gm;
 
 function artifactDir(projectRoot) {
@@ -60,7 +60,7 @@ Mark each milestone \`[x]\` when complete. Do not mark complete until the verifi
 
 - [ ] **M1: Explore** — understand project layout and constraints | verify: \`list_project once\`
 - [ ] **M2: Implement** — create or fix required files | verify: \`syntax + references resolve\`
-- [ ] **Final: all checks pass** — verify: \`harness completion gate\`
+- [ ] **Final: all checks pass** | verify: \`harness completion gate\`
 
 ## Scope boundaries
 
@@ -165,27 +165,31 @@ class PlanArtifacts {
         let text = '';
         try { text = fs.readFileSync(planPath(this.projectRoot), 'utf-8'); } catch (e) { return; }
 
+        const byId = new Map();
+        const hits = [];
         let m;
+
         MILESTONE_RE.lastIndex = 0;
         while ((m = MILESTONE_RE.exec(text)) !== null) {
-            this.milestones.push({
-                id: m[2],
-                done: m[1].toLowerCase() === 'x',
-                verify: m[3].trim(),
-                e2e: null
-            });
+            hits.push({ index: m.index, id: m[2], done: m[1].toLowerCase() === 'x', verify: m[3].trim(), e2e: null });
         }
-        if (!this.milestones.length) {
-            MILESTONE_E2E_RE.lastIndex = 0;
-            while ((m = MILESTONE_E2E_RE.exec(text)) !== null) {
-                this.milestones.push({
-                    id: m[2],
-                    done: m[1].toLowerCase() === 'x',
-                    verify: null,
-                    e2e: m[3].trim()
-                });
+
+        MILESTONE_E2E_RE.lastIndex = 0;
+        while ((m = MILESTONE_E2E_RE.exec(text)) !== null) {
+            hits.push({ index: m.index, id: m[2], done: m[1].toLowerCase() === 'x', verify: null, e2e: m[3].trim() });
+        }
+
+        hits.sort((a, b) => a.index - b.index);
+        for (const h of hits) {
+            if (!byId.has(h.id)) {
+                byId.set(h.id, { id: h.id, done: h.done, verify: null, e2e: null });
+                this.milestones.push(byId.get(h.id));
             }
+            const existing = byId.get(h.id);
+            if (h.verify) existing.verify = h.verify;
+            if (h.e2e) existing.e2e = h.e2e;
         }
+
         if (!this.milestones.length) {
             MILESTONE_SIMPLE.lastIndex = 0;
             while ((m = MILESTONE_SIMPLE.exec(text)) !== null) {

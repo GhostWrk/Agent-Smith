@@ -18,6 +18,20 @@ test('collectRecentToolPairs keeps last N assistant+tool pairs', () => {
     assert.equal(pairs[1].tools[0].content, 'c');
 });
 
+test('collectRecentToolPairs preserves every tool result from a multi-tool turn', () => {
+    const messages = [
+        { role: 'assistant', tool_calls: [{ id: '1' }, { id: '2' }] },
+        { role: 'tool', tool_call_id: '1', content: 'first result' },
+        { role: 'tool', tool_call_id: '2', content: 'second result' },
+        { role: 'assistant', tool_calls: [{ id: '3' }] },
+        { role: 'tool', tool_call_id: '3', content: 'third result' }
+    ];
+    const pairs = collectRecentToolPairs(messages, 2);
+    assert.equal(pairs.length, 2);
+    assert.deepEqual(pairs[0].tools.map(t => t.content), ['first result', 'second result']);
+    assert.deepEqual(pairs[1].tools.map(t => t.content), ['third result']);
+});
+
 test('compactForPhaseTransition preserves plan anchor and drops old messages', () => {
     const planAnchor = new PlanAnchor('build todo app');
     planAnchor.addNote('keep this note');
